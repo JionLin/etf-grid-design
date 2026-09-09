@@ -15,6 +15,8 @@ from algorithms.grid.arithmetic_grid import ArithmeticGridCalculator
 from algorithms.grid.geometric_grid import GeometricGridCalculator
 from algorithms.grid.optimizer import GridOptimizer
 from .suitability_analyzer import SuitabilityAnalyzer
+from .grid_calculator import CompositeGridCalculator
+from .backtest_engine import GridBacktestEngine
 
 
 logger = logging.getLogger(__name__)
@@ -46,6 +48,8 @@ class ETFAnalysisService:
         self.geometric_calculator = geometric_calculator or GeometricGridCalculator()
         self.grid_optimizer = grid_optimizer or GridOptimizer()
         self.suitability_analyzer = suitability_analyzer or SuitabilityAnalyzer()
+        self.composite_grid_calculator = CompositeGridCalculator()
+        self.backtest_engine = GridBacktestEngine()
         
         # 热门ETF列表 (涵盖宽基指数、稳定行业与景气行业核心标的)
         self.popular_etfs = [
@@ -442,6 +446,14 @@ class ETFAnalysisService:
             
             # 8. ATR评分
             atr_score, atr_description = self.atr_analyzer.get_atr_score(atr_ratio)
+
+            # 9. 计算大中小三层复合网格 (20%:35%:45% 分层多轨与合并阶梯)
+            composite_steps = self.grid_optimizer.calculate_composite_steps(
+                current_price, atr_ratio, adjustment_coefficient
+            )
+            composite_grid = self.composite_grid_calculator.calculate_composite_grid(
+                total_capital, current_price, composite_steps, base_position_ratio=0.5
+            )
             
             result = {
                 'current_price': current_price,
@@ -459,6 +471,7 @@ class ETFAnalysisService:
                 },
                 'price_levels': [round(p, 3) for p in price_levels],
                 'fund_allocation': fund_allocation,
+                'composite_grid': composite_grid,
                 'risk_preference': risk_preference,
                 'atr_based': True,
                 'atr_score': atr_score,
@@ -480,4 +493,50 @@ class ETFAnalysisService:
             
         except Exception as e:
             logger.error(f"网格策略参数计算失败: {str(e)}")
+            raise
+
+    def run_strategy_backtest(
+        self,
+        etf_code: str,
+        total_capital: float,
+        backtest_days: int = 180,
+        adjustment_coefficient: float = 1.0,
+    ) -> Dict:
+        """
+        运行策略历史回测
+
+        Args:
+            etf_code: ETF代码
+            total_capital: 资金量
+            backtest_days: 回测天数 (默认 180 天)
+            adjustment_coefficient: 调节系数
+
+        Returns:
+            Dict: 回测结果
+        """
+        try:
+            df = self.get_historical_data(etf_code, days=backtest_days)
+            if df is None or df.empty:
+                raise ValueError(f"无法获取 ETF {etf_code} 历史行情数据")
+
+            current_price = float(df.iloc[-1]['close'])
+            etf_info = self.get_etf_basic_info(etf_code) or {'code': etf_code, 'name': etf_code}
+            suitability = self.suitability_analyzer.comprehensive_evaluation(df, etf_info)
+            atr_analysis = suitability['atr_analysis']
+            atr_ratio = atr_analysis['current_atr_ratio']
+
+            composite_steps = self.grid_optimizer.calculate_composite_steps(
+                current_price, atr_ratio, adjustment_coefficient
+            )
+            composite_grid = self.composite_grid_calculator.calculate_composite_grid(
+                total_capital, current_price, composite_steps, base_position_ratio=0.5
+            )
+
+            return self.backtest_engine.run_backtest(
+                daily_df=df,
+                total_capital=total_capital,
+                composite_grid=composite_grid,
+            )
+        except Exception as e:
+            logger.error(f"策略历史回测执行失败: {str(e)}")
             raise

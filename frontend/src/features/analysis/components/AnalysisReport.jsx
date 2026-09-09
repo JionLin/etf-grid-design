@@ -7,6 +7,7 @@ import ErrorState from "./ErrorState";
 import Disclaimer from "./Disclaimer";
 import SuitabilityCard from "./ReportCards/SuitabilityCard";
 import GridParametersCard from "./ReportCards/GridParametersCard";
+import BacktestCard from "./ReportCards/BacktestCard";
 
 /**
  * 分析报告容器组件
@@ -136,12 +137,47 @@ const AnalysisReport = ({
         <div className="p-6">
           {/* 概览标签页 */}
           {activeTab === "overview" && (
-            <OverviewTab
-              etfInfo={etf_info}
-              suitabilityEvaluation={suitability_evaluation}
-              gridStrategy={grid_strategy}
-              dataQuality={data_quality}
-              inputParameters={input_parameters}
+            <div className="space-y-6">
+              <OverviewTab
+                etfInfo={etf_info}
+                suitabilityEvaluation={suitability_evaluation}
+                gridStrategy={grid_strategy}
+                dataQuality={data_quality}
+                inputParameters={input_parameters}
+              />
+              <BacktestCard
+                etfCode={input_parameters?.etfCode || etf_info?.code}
+                totalCapital={input_parameters?.totalCapital || 100000}
+                initialDays={input_parameters?.analysisDays || 180}
+              />
+            </div>
+          )}
+
+          {/* 网格策略标签页 */}
+          {activeTab === "strategy" && (
+            <div className="space-y-6">
+              <GridParametersCard
+                gridStrategy={grid_strategy}
+                inputParameters={input_parameters}
+                strategyRationale={strategy_rationale}
+                adjustmentSuggestions={adjustment_suggestions}
+                showDetailed={true}
+                dataQuality={data_quality}
+              />
+              <BacktestCard
+                etfCode={input_parameters?.etfCode || etf_info?.code}
+                totalCapital={input_parameters?.totalCapital || 100000}
+                initialDays={input_parameters?.analysisDays || 180}
+              />
+            </div>
+          )}
+
+          {/* 历史回测标签页 */}
+          {activeTab === "backtest" && (
+            <BacktestCard
+              etfCode={input_parameters?.etfCode || etf_info?.code}
+              totalCapital={input_parameters?.totalCapital || 100000}
+              initialDays={input_parameters?.analysisDays || 180}
             />
           )}
 
@@ -151,18 +187,6 @@ const AnalysisReport = ({
               evaluation={suitability_evaluation}
               dataQuality={data_quality}
               showDetailed={true}
-            />
-          )}
-
-          {/* 网格策略标签页 */}
-          {activeTab === "strategy" && (
-            <GridParametersCard
-              gridStrategy={grid_strategy}
-              inputParameters={input_parameters}
-              strategyRationale={strategy_rationale}
-              adjustmentSuggestions={adjustment_suggestions}
-              showDetailed={true}
-              dataQuality={data_quality}
             />
           )}
         </div>

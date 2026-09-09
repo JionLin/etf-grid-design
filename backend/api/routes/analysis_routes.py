@@ -111,3 +111,32 @@ def analyze_etf_strategy():
             'success': False,
             'error': '分析失败，请稍后重试或检查ETF代码是否正确'
         }), 500
+
+@analysis_bp.route('/api/backtest', methods=['POST'])
+def run_backtest():
+    """网格策略真实历史回测"""
+    try:
+        data = request.get_json() or {}
+        etf_code = data.get('etfCode')
+        if not etf_code:
+            return jsonify({'success': False, 'error': 'ETF代码不能为空'}), 400
+
+        total_capital = float(data.get('totalCapital', 100000))
+        backtest_days = int(data.get('backtestDays', 180))
+        adjustment_coefficient = float(data.get('adjustmentCoefficient', 1.0))
+
+        result = etf_service.run_strategy_backtest(
+            etf_code=etf_code,
+            total_capital=total_capital,
+            backtest_days=backtest_days,
+            adjustment_coefficient=adjustment_coefficient,
+        )
+
+        return jsonify({'success': True, 'data': result})
+    except ValueError as e:
+        return jsonify({'success': False, 'error': str(e)}), 400
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"策略回测失败: {str(e)}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': f"回测计算异常: {str(e)}"}), 500

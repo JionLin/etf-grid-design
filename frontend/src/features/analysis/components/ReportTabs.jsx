@@ -1,5 +1,5 @@
 import React from "react";
-import { Eye, ThermometerSun, Grid3X3 } from "lucide-react";
+import { Eye, ThermometerSun, Grid3X3, TrendingUp } from "lucide-react";
 
 /**
  * 报告标签页导航组件
@@ -7,16 +7,21 @@ import { Eye, ThermometerSun, Grid3X3 } from "lucide-react";
  */
 export default function ReportTabs({ activeTab, onTabChange }) {
   const tabs = [
-    { id: "overview", label: "概览", icon: <Eye className="w-4 h-4" /> },
-    {
-      id: "suitability",
-      label: "适宜度评估",
-      icon: <ThermometerSun className="w-4 h-4" />,
-    },
+    { id: "overview", label: "概览看板", icon: <Eye className="w-4 h-4" /> },
     {
       id: "strategy",
-      label: "网格策略",
+      label: "立体网格策略",
       icon: <Grid3X3 className="w-4 h-4" />,
+    },
+    {
+      id: "backtest",
+      label: "历史策略回测",
+      icon: <TrendingUp className="w-4 h-4" />,
+    },
+    {
+      id: "suitability",
+      label: "标的体检报告",
+      icon: <ThermometerSun className="w-4 h-4" />,
     },
   ];
 

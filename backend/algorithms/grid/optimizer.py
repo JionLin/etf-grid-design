@@ -4,7 +4,7 @@
 """
 
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 import logging
 from .arithmetic_grid import ArithmeticGridCalculator
 from .geometric_grid import GeometricGridCalculator
@@ -74,6 +74,71 @@ class GridOptimizer:
             # 返回默认步长（1%）
             default_step_ratio = 0.01
             return current_price * default_step_ratio, default_step_ratio
+
+    def calculate_composite_steps(self, current_price: float, atr_ratio: float,
+                                  adjustment_coefficient: float = 1.0) -> Dict[str, Dict[str, Any]]:
+        """
+        计算大中小三层复合网格的自适应步长与资金配置
+
+        Args:
+            current_price: 当前价格
+            atr_ratio: ATR比率
+            adjustment_coefficient: 调节系数
+
+        Returns:
+            Dict包含 small, medium, large 的步长、资金比例与档位数
+        """
+        try:
+            # 基础乘数：小网 0.6，中网 1.2，大网 2.5
+            config_template = {
+                'small': {
+                    'rail': 'small',
+                    'name': '小网 (高频做T)',
+                    'tag': '小网',
+                    'capital_ratio': 0.20,
+                    'base_multiplier': 0.6,
+                    'levels_per_side': 5,
+                },
+                'medium': {
+                    'rail': 'medium',
+                    'name': '中网 (波段巡航)',
+                    'tag': '中网',
+                    'capital_ratio': 0.35,
+                    'base_multiplier': 1.2,
+                    'levels_per_side': 3,
+                },
+                'large': {
+                    'rail': 'large',
+                    'name': '大网 (估值防守)',
+                    'tag': '大网',
+                    'capital_ratio': 0.45,
+                    'base_multiplier': 2.5,
+                    'levels_per_side': 2,
+                }
+            }
+
+            result = {}
+            for rail, conf in config_template.items():
+                multiplier = conf['base_multiplier'] * adjustment_coefficient
+                step_ratio = atr_ratio * multiplier
+                # 约束合理范围 (0.2% - 25%)
+                step_ratio = max(0.002, min(0.25, step_ratio))
+                step_size = step_ratio * current_price
+
+                result[rail] = {
+                    'rail': conf['rail'],
+                    'name': conf['name'],
+                    'tag': conf['tag'],
+                    'capital_ratio': conf['capital_ratio'],
+                    'multiplier': round(multiplier, 2),
+                    'step_ratio': round(step_ratio, 4),
+                    'step_size': round(step_size, 4),
+                    'levels_per_side': conf['levels_per_side'],
+                }
+            return result
+        except Exception as e:
+            logger.error(f"复合网格步长计算失败: {str(e)}")
+            return {}
     
     def calculate_base_position_ratio(self, atr_ratio: float, risk_preference: str, 
                                     adx_value: float, volatility: float) -> float:

@@ -47,6 +47,8 @@ const GridParametersCard = ({
 
   // 挂单视图模式：'ladder' 阶梯挂单清单（推荐）| 'matrix' 方块矩阵
   const [viewMode, setViewMode] = useState("ladder");
+  // 复合轨道筛选：'all' 全部合并 | 'small' 小网 | 'medium' 中网 | 'large' 大网
+  const [selectedRail, setSelectedRail] = useState("all");
   // 复制反馈状态
   const [copiedKey, setCopiedKey] = useState(null);
 
@@ -54,6 +56,26 @@ const GridParametersCard = ({
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  const handleCopyAllOrders = (orders, baseInfo) => {
+    if (!orders || orders.length === 0) return;
+    const symbolCode = inputParameters?.etfCode || "ETF";
+    const lines = [
+      `=== ${symbolCode} 复合网格挂单清单 ===`,
+      `基准价格: ¥${current_price?.toFixed(3)} | 底仓: ${baseInfo?.shares?.toLocaleString() || 0} 股 (约 ¥${baseInfo?.actual_capital?.toLocaleString() || 0})`,
+      `----------------------------------------------------`,
+    ];
+    orders.forEach((o) => {
+      lines.push(
+        `[${o.tag || "网格"}] ${o.level_label || ""} ${o.action_label} | 价格: ¥${Number(o.price).toFixed(3)} | 委托: ${o.shares} 股 | 资金: ¥${o.amount} | 单网预估净利: +¥${o.est_profit}`
+      );
+    });
+    lines.push(`----------------------------------------------------`);
+    lines.push(`* 请在券商 APP (华宝智投/银河/同花顺等) 条件单中直接按上述价格与股数设置。`);
+    navigator.clipboard.writeText(lines.join("\n"));
+    setCopiedKey("copy_all_orders");
+    setTimeout(() => setCopiedKey(null), 2500);
   };
 
   // 获取价格日期显示文本
@@ -336,7 +358,7 @@ const GridParametersCard = ({
         </div>
 
         {/* 网格价格水平与做T挂单阶梯 */}
-        {gridStrategy.price_levels && (
+        {(gridStrategy.composite_grid || gridStrategy.price_levels) && (
           <>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 mt-6">
               <div className="flex items-center gap-3">
@@ -344,39 +366,227 @@ const GridParametersCard = ({
                   <ListOrdered className="w-5 h-5 text-blue-600" />
                 </div>
                 <div>
-                  <h4 className="font-semibold text-gray-900 text-base">网格做T挂单执行阶梯</h4>
-                  <p className="text-xs text-gray-500">可直接对照在证券交易软件中设置条件单</p>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-semibold text-gray-900 text-base">立体网格挂单执行阶梯</h4>
+                    <span className="text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+                      大中小三轨合一
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500">已按整百股数对齐，可直接对照在证券交易软件中设置条件单</p>
                 </div>
               </div>
 
-              {/* 视图切换按钮 */}
-              <div className="flex items-center bg-gray-100 p-1 rounded-lg self-start sm:self-auto text-xs">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* 一键复制全部条件单 */}
                 <button
                   type="button"
-                  onClick={() => setViewMode("ladder")}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-all ${
-                    viewMode === "ladder"
-                      ? "bg-white text-blue-700 shadow-xs"
-                      : "text-gray-600 hover:text-gray-900"
-                  }`}
+                  onClick={() => {
+                    const comp = gridStrategy.composite_grid;
+                    const list = comp?.merged_ladder
+                      ? comp.merged_ladder.filter((o) => selectedRail === "all" || o.rail === selectedRail)
+                      : [];
+                    handleCopyAllOrders(list, comp?.base_position);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors shadow-2xs"
+                  title="一键复制当前筛选的全部条件单挂单参数"
                 >
-                  <ListOrdered className="w-3.5 h-3.5" />
-                  阶梯挂单表
+                  {copiedKey === "copy_all_orders" ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-green-600" />
+                      <span className="text-green-700 font-bold">已复制全部条件单</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>一键复制条件单</span>
+                    </>
+                  )}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("matrix")}
-                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-all ${
-                    viewMode === "matrix"
-                      ? "bg-white text-blue-700 shadow-xs"
-                      : "text-gray-600 hover:text-gray-900"
-                  }`}
-                >
-                  <LayoutGrid className="w-3.5 h-3.5" />
-                  矩阵方块
-                </button>
+
+                {/* 视图切换按钮 */}
+                <div className="flex items-center bg-gray-100 p-1 rounded-lg self-start sm:self-auto text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("ladder")}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-all ${
+                      viewMode === "ladder"
+                        ? "bg-white text-blue-700 shadow-xs"
+                        : "text-gray-600 hover:text-gray-900"
+                    }`}
+                  >
+                    <ListOrdered className="w-3.5 h-3.5" />
+                    阶梯挂单表
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("matrix")}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-all ${
+                      viewMode === "matrix"
+                        ? "bg-white text-blue-700 shadow-xs"
+                        : "text-gray-600 hover:text-gray-900"
+                    }`}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    矩阵方块
+                  </button>
+                </div>
               </div>
             </div>
+
+            {/* 大中小三轨概览胶囊卡 */}
+            {gridStrategy.composite_grid?.rails && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                {/* 🟢 小网 */}
+                <div className="p-3.5 rounded-xl border border-emerald-200 bg-emerald-50/70 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-900">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                      {gridStrategy.composite_grid.rails.small?.name}
+                    </span>
+                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                      流动金 20%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 text-center font-sans text-xs">
+                    <div className="bg-white/70 py-1.5 px-1 rounded-lg border border-emerald-100">
+                      <div className="text-[10px] text-gray-500">分配金额</div>
+                      <div className="font-bold text-gray-900">
+                        ¥{gridStrategy.composite_grid.rails.small?.capital?.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="bg-white/70 py-1.5 px-1 rounded-lg border border-emerald-100">
+                      <div className="text-[10px] text-gray-500">步长比例</div>
+                      <div className="font-bold text-emerald-700">
+                        {(gridStrategy.composite_grid.rails.small?.step_ratio * 100).toFixed(2)}%
+                      </div>
+                    </div>
+                    <div className="bg-white/70 py-1.5 px-1 rounded-lg border border-emerald-100">
+                      <div className="text-[10px] text-gray-500">单边档位</div>
+                      <div className="font-bold text-gray-900">
+                        {gridStrategy.composite_grid.rails.small?.levels_count} 档
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🔵 中网 */}
+                <div className="p-3.5 rounded-xl border border-blue-200 bg-blue-50/70 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-900">
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                      {gridStrategy.composite_grid.rails.medium?.name}
+                    </span>
+                    <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full border border-blue-300">
+                      流动金 35%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 text-center font-sans text-xs">
+                    <div className="bg-white/70 py-1.5 px-1 rounded-lg border border-blue-100">
+                      <div className="text-[10px] text-gray-500">分配金额</div>
+                      <div className="font-bold text-gray-900">
+                        ¥{gridStrategy.composite_grid.rails.medium?.capital?.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="bg-white/70 py-1.5 px-1 rounded-lg border border-blue-100">
+                      <div className="text-[10px] text-gray-500">步长比例</div>
+                      <div className="font-bold text-blue-700">
+                        {(gridStrategy.composite_grid.rails.medium?.step_ratio * 100).toFixed(2)}%
+                      </div>
+                    </div>
+                    <div className="bg-white/70 py-1.5 px-1 rounded-lg border border-blue-100">
+                      <div className="text-[10px] text-gray-500">单边档位</div>
+                      <div className="font-bold text-gray-900">
+                        {gridStrategy.composite_grid.rails.medium?.levels_count} 档
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🟣 大网 */}
+                <div className="p-3.5 rounded-xl border border-purple-200 bg-purple-50/70 shadow-2xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-bold text-purple-900">
+                      <span className="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+                      {gridStrategy.composite_grid.rails.large?.name}
+                    </span>
+                    <span className="text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full border border-purple-300">
+                      流动金 45%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 text-center font-sans text-xs">
+                    <div className="bg-white/70 py-1.5 px-1 rounded-lg border border-purple-100">
+                      <div className="text-[10px] text-gray-500">分配金额</div>
+                      <div className="font-bold text-gray-900">
+                        ¥{gridStrategy.composite_grid.rails.large?.capital?.toLocaleString()}
+                      </div>
+                    </div>
+                    <div className="bg-white/70 py-1.5 px-1 rounded-lg border border-purple-100">
+                      <div className="text-[10px] text-gray-500">步长比例</div>
+                      <div className="font-bold text-purple-700">
+                        {(gridStrategy.composite_grid.rails.large?.step_ratio * 100).toFixed(2)}%
+                      </div>
+                    </div>
+                    <div className="bg-white/70 py-1.5 px-1 rounded-lg border border-purple-100">
+                      <div className="text-[10px] text-gray-500">单边档位</div>
+                      <div className="font-bold text-gray-900">
+                        {gridStrategy.composite_grid.rails.large?.levels_count} 档
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 分轨快速筛选标签 */}
+            {gridStrategy.composite_grid?.merged_ladder && (
+              <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                <span className="text-xs text-gray-500 mr-1 font-medium">轨道筛选:</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRail("all")}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                    selectedRail === "all"
+                      ? "bg-gray-900 text-white shadow-xs font-bold"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  ★ 全部多轨合并 ({gridStrategy.composite_grid.merged_ladder.length} 档)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRail("small")}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                    selectedRail === "small"
+                      ? "bg-emerald-600 text-white shadow-xs font-bold"
+                      : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
+                  }`}
+                >
+                  🟢 仅看小网
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRail("medium")}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                    selectedRail === "medium"
+                      ? "bg-blue-600 text-white shadow-xs font-bold"
+                      : "bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
+                  }`}
+                >
+                  🔵 仅看中网
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedRail("large")}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
+                    selectedRail === "large"
+                      ? "bg-purple-600 text-white shadow-xs font-bold"
+                      : "bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200"
+                  }`}
+                >
+                  🟣 仅看大网
+                </button>
+              </div>
+            )}
 
             {/* 模式一：纵向订单簿阶梯清单 */}
             {viewMode === "ladder" && (
@@ -385,154 +595,327 @@ const GridParametersCard = ({
                   <table className="w-full text-left border-collapse text-xs">
                     <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10 border-b border-gray-200">
                       <tr>
-                        <th className="py-2.5 px-4 font-semibold">档位</th>
-                        <th className="py-2.5 px-4 font-semibold">触发价格</th>
-                        <th className="py-2.5 px-4 font-semibold">交易动作</th>
-                        <th className="py-2.5 px-4 font-semibold">委托数量</th>
-                        <th className="py-2.5 px-4 font-semibold">资金占用</th>
-                        <th className="py-2.5 px-4 font-semibold">预计单网净利</th>
-                        <th className="py-2.5 px-4 font-semibold text-center">快捷操作</th>
+                        <th className="py-2.5 px-3 font-semibold">档位</th>
+                        <th className="py-2.5 px-3 font-semibold">触发价格</th>
+                        <th className="py-2.5 px-3 font-semibold">轨道</th>
+                        <th className="py-2.5 px-3 font-semibold">交易动作</th>
+                        <th className="py-2.5 px-3 font-semibold">委托数量</th>
+                        <th className="py-2.5 px-3 font-semibold">资金占用</th>
+                        <th className="py-2.5 px-3 font-semibold">单网预估净利</th>
+                        <th className="py-2.5 px-3 font-semibold">资金深度</th>
+                        <th className="py-2.5 px-3 font-semibold text-center">快捷操作</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 font-mono">
                       {(() => {
-                        const priceLevels = gridStrategy.price_levels;
-                        const singleQty = fund_allocation?.single_trade_quantity || 1000;
-                        const expectedProfit = fund_allocation?.expected_profit_per_trade || (singleQty * current_price * 0.03);
-                        const baseShares = fund_allocation?.algorithm_details?.base_position_shares || fund_allocation?.base_position_shares || Math.round((fund_allocation?.base_position_amount || 50000) / current_price / 100) * 100;
-                        const baseAmount = fund_allocation?.base_position_amount || (baseShares * current_price);
+                        const comp = gridStrategy.composite_grid;
                         const symbolCode = inputParameters?.etfCode || "";
 
-                        // 分离为卖出、现价和买入
+                        // 如果有复合网格数据，使用复合网格阶梯
+                        if (comp?.merged_ladder) {
+                          const baseInfo = comp.base_position || {};
+                          const allOrders = comp.merged_ladder;
+                          const filteredOrders = allOrders.filter(
+                            (o) => selectedRail === "all" || o.rail === selectedRail
+                          );
+
+                          const sellOrders = filteredOrders.filter((o) => o.action === "SELL");
+                          const buyOrders = filteredOrders.filter((o) => o.action === "BUY");
+
+                          const rows = [];
+
+                          // 1. 卖出档位 (由高到低)
+                          sellOrders.forEach((o) => {
+                            const copyText = `${symbolCode} 卖出 价格:${o.price.toFixed(3)} 数量:${o.shares}股`;
+                            const rowKey = o.id;
+
+                            // 轨道徽章样式
+                            const railBadge =
+                              o.rail === "large" ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200 font-sans">
+                                  🟣 大网
+                                </span>
+                              ) : o.rail === "medium" ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 font-sans">
+                                  🔵 中网
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 font-sans">
+                                  🟢 小网
+                                </span>
+                              );
+
+                            // 深度条宽度
+                            const depthWidth = Math.min(100, Math.max(15, o.depth_ratio || 25));
+
+                            rows.push(
+                              <tr key={rowKey} className="hover:bg-amber-50/50 transition-colors">
+                                <td className="py-2 px-3 font-semibold text-amber-700">
+                                  {o.level_label}
+                                </td>
+                                <td className="py-2 px-3 text-sm font-bold text-gray-900">
+                                  ¥{o.price.toFixed(3)}
+                                </td>
+                                <td className="py-2 px-3">{railBadge}</td>
+                                <td className="py-2 px-3">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 font-sans">
+                                    <ArrowUpRight className="w-3 h-3" /> 卖出做T
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 text-gray-800 font-bold">
+                                  {o.shares.toLocaleString()} 股
+                                </td>
+                                <td className="py-2 px-3 text-gray-600">
+                                  ¥{o.amount.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                </td>
+                                <td className="py-2 px-3 text-red-600 font-semibold font-sans">
+                                  +¥{o.est_profit.toFixed(1)}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="w-14 bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full ${
+                                          o.rail === "large"
+                                            ? "bg-purple-500"
+                                            : o.rail === "medium"
+                                            ? "bg-blue-500"
+                                            : "bg-emerald-500"
+                                        }`}
+                                        style={{ width: `${depthWidth}%` }}
+                                      ></div>
+                                    </div>
+                                    <span className="text-[10px] text-gray-500 font-sans">{o.depth_ratio}%</span>
+                                  </div>
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyOrder(rowKey, copyText)}
+                                    className="inline-flex items-center gap-1 text-[11px] font-sans px-2 py-0.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                                    title="复制挂单参数"
+                                  >
+                                    {copiedKey === rowKey ? (
+                                      <span className="text-green-600 flex items-center gap-0.5">
+                                        <Check className="w-3 h-3" /> 已复制
+                                      </span>
+                                    ) : (
+                                      <span className="flex items-center gap-0.5">
+                                        <Copy className="w-3 h-3" /> 复制
+                                      </span>
+                                    )}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          });
+
+                          // 2. 基准价格锚点行
+                          rows.push(
+                            <tr key="current_anchor" className="bg-blue-50/90 border-y-2 border-blue-300 font-sans">
+                              <td className="py-2.5 px-3 font-bold text-blue-900 flex items-center gap-1.5">
+                                <span className="inline-block w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+                                【现价基准】
+                              </td>
+                              <td className="py-2.5 px-3 text-base font-bold text-blue-900 font-mono">
+                                ¥{current_price.toFixed(3)}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span className="text-[10px] font-bold text-blue-800 bg-blue-200/80 px-1.5 py-0.5 rounded">
+                                  基准轴心
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 font-medium text-blue-800">
+                                现价持仓水温
+                              </td>
+                              <td className="py-2.5 px-3 font-bold text-blue-900 font-mono">
+                                底仓 {(baseInfo.shares || 0).toLocaleString()} 股
+                              </td>
+                              <td className="py-2.5 px-3 font-bold text-blue-900 font-mono">
+                                底仓 ¥{(baseInfo.actual_capital || 0).toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                              </td>
+                              <td className="py-2.5 px-3 text-blue-600 font-medium">
+                                50% 底仓轮动
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span className="text-[10px] text-blue-700 font-bold">50% 底仓池</span>
+                              </td>
+                              <td className="py-2.5 px-3 text-center text-blue-700 text-xs font-semibold">
+                                轴心基准
+                              </td>
+                            </tr>
+                          );
+
+                          // 3. 买入档位 (由高到低)
+                          buyOrders.forEach((o) => {
+                            const copyText = `${symbolCode} 买入 价格:${o.price.toFixed(3)} 数量:${o.shares}股`;
+                            const rowKey = o.id;
+
+                            const railBadge =
+                              o.rail === "large" ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200 font-sans">
+                                  🟣 大网
+                                </span>
+                              ) : o.rail === "medium" ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 font-sans">
+                                  🔵 中网
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 font-sans">
+                                  🟢 小网
+                                </span>
+                              );
+
+                            const depthWidth = Math.min(100, Math.max(15, o.depth_ratio || 25));
+
+                            rows.push(
+                              <tr key={rowKey} className="hover:bg-emerald-50/50 transition-colors">
+                                <td className="py-2 px-3 font-semibold text-emerald-700">
+                                  {o.level_label}
+                                </td>
+                                <td className="py-2 px-3 text-sm font-bold text-gray-900">
+                                  ¥{o.price.toFixed(3)}
+                                </td>
+                                <td className="py-2 px-3">{railBadge}</td>
+                                <td className="py-2 px-3">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-800 font-sans">
+                                    <ArrowDownRight className="w-3 h-3" /> 买入低吸
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3 text-gray-800 font-bold">
+                                  {o.shares.toLocaleString()} 股
+                                </td>
+                                <td className="py-2 px-3 text-gray-600">
+                                  ¥{o.amount.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                                </td>
+                                <td className="py-2 px-3 text-emerald-600 font-semibold font-sans">
+                                  +¥{o.est_profit.toFixed(1)}
+                                </td>
+                                <td className="py-2 px-3">
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="w-14 bg-gray-100 h-1.5 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full ${
+                                          o.rail === "large"
+                                            ? "bg-purple-500"
+                                            : o.rail === "medium"
+                                            ? "bg-blue-500"
+                                            : "bg-emerald-500"
+                                        }`}
+                                        style={{ width: `${depthWidth}%` }}
+                                      ></div>
+                                    </div>
+                                    <span className="text-[10px] text-gray-500 font-sans">{o.depth_ratio}%</span>
+                                  </div>
+                                </td>
+                                <td className="py-2 px-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyOrder(rowKey, copyText)}
+                                    className="inline-flex items-center gap-1 text-[11px] font-sans px-2 py-0.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                                    title="复制挂单参数"
+                                  >
+                                    {copiedKey === rowKey ? (
+                                      <span className="text-green-600 flex items-center gap-0.5">
+                                        <Check className="w-3 h-3" /> 已复制
+                                      </span>
+                                    ) : (
+                                      <span className="flex items-center gap-0.5">
+                                        <Copy className="w-3 h-3" /> 复制
+                                      </span>
+                                    )}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          });
+
+                          return rows;
+                        }
+
+                        // 回退旧版单一网格
+                        const priceLevels = gridStrategy.price_levels || [];
+                        const singleQty = fund_allocation?.single_trade_quantity || 1000;
+                        const expectedProfit = fund_allocation?.expected_profit_per_trade || (singleQty * current_price * 0.03);
+                        const baseShares = Math.round((fund_allocation?.base_position_amount || 50000) / current_price / 100) * 100;
+                        const baseAmount = baseShares * current_price;
+
                         const sellLevels = priceLevels.filter((p) => p > current_price).sort((a, b) => b - a);
                         const buyLevels = priceLevels.filter((p) => p < current_price).sort((a, b) => b - a);
-
                         const rows = [];
 
-                        // 1. 卖出档位 (从高到低)
                         sellLevels.forEach((price, idx) => {
                           const levelNum = sellLevels.length - idx;
                           const fundAmount = singleQty * price;
                           const copyText = `${symbolCode} 卖出 价格:${price.toFixed(3)} 数量:${singleQty}股`;
                           const rowKey = `sell_${levelNum}`;
-
                           rows.push(
                             <tr key={rowKey} className="hover:bg-amber-50/50 transition-colors">
-                              <td className="py-2.5 px-4 font-semibold text-amber-700">
-                                卖出 第+{levelNum}档
-                              </td>
-                              <td className="py-2.5 px-4 text-sm font-bold text-gray-900">
-                                ¥{price.toFixed(3)}
-                              </td>
+                              <td className="py-2.5 px-4 font-semibold text-amber-700">卖出 第+{levelNum}档</td>
+                              <td className="py-2.5 px-4 text-sm font-bold text-gray-900">¥{price.toFixed(3)}</td>
+                              <td className="py-2.5 px-4"><span className="text-gray-500">基础</span></td>
                               <td className="py-2.5 px-4">
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 font-sans">
-                                  <ArrowUpRight className="w-3 h-3" /> 卖出底仓做T
+                                  <ArrowUpRight className="w-3 h-3" /> 卖出做T
                                 </span>
                               </td>
-                              <td className="py-2.5 px-4 text-gray-800">
-                                {singleQty.toLocaleString()} 股
-                              </td>
-                              <td className="py-2.5 px-4 text-gray-600">
-                                ¥{fundAmount.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                              </td>
-                              <td className="py-2.5 px-4 text-red-600 font-semibold font-sans">
-                                +¥{expectedProfit.toFixed(1)}
-                              </td>
+                              <td className="py-2.5 px-4 text-gray-800">{singleQty.toLocaleString()} 股</td>
+                              <td className="py-2.5 px-4 text-gray-600">¥{fundAmount.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                              <td className="py-2.5 px-4 text-red-600 font-semibold font-sans">+¥{expectedProfit.toFixed(1)}</td>
+                              <td className="py-2.5 px-4"><span className="text-[10px] text-gray-400">-</span></td>
                               <td className="py-2.5 px-4 text-center">
                                 <button
                                   type="button"
                                   onClick={() => handleCopyOrder(rowKey, copyText)}
-                                  className="inline-flex items-center gap-1 text-[11px] font-sans px-2.5 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-                                  title="复制挂单参数"
+                                  className="inline-flex items-center gap-1 text-[11px] font-sans px-2.5 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-100"
                                 >
-                                  {copiedKey === rowKey ? (
-                                    <span className="text-green-600 flex items-center gap-0.5">
-                                      <Check className="w-3 h-3" /> 已复制
-                                    </span>
-                                  ) : (
-                                    <span className="flex items-center gap-0.5">
-                                      <Copy className="w-3 h-3" /> 复制
-                                    </span>
-                                  )}
+                                  {copiedKey === rowKey ? <span className="text-green-600 flex items-center"><Check className="w-3 h-3" /> 已复制</span> : <span className="flex items-center"><Copy className="w-3 h-3" /> 复制</span>}
                                 </button>
                               </td>
                             </tr>
                           );
                         });
 
-                        // 2. 当前基准价格锚点行
                         rows.push(
-                          <tr key="current_anchor" className="bg-blue-50/90 border-y-2 border-blue-300 font-sans">
-                            <td className="py-3 px-4 font-bold text-blue-900 flex items-center gap-1.5">
-                              <span className="inline-block w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
-                              【现价锚点】
-                            </td>
-                            <td className="py-3 px-4 text-base font-bold text-blue-900 font-mono">
-                              ¥{current_price.toFixed(3)}
-                            </td>
-                            <td className="py-3 px-4 font-medium text-blue-800">
-                              持仓观察 / 底仓基准线
-                            </td>
-                            <td className="py-3 px-4 font-bold text-blue-900 font-mono">
-                              底仓 {baseShares.toLocaleString()} 股
-                            </td>
-                            <td className="py-3 px-4 font-bold text-blue-900 font-mono">
-                              底仓 ¥{baseAmount.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                            </td>
-                            <td className="py-3 px-4 text-blue-600 font-medium">
-                              T+1 轮动底仓
-                            </td>
-                            <td className="py-3 px-4 text-center text-blue-700 text-xs">
-                              基准水位
-                            </td>
+                          <tr key="current_anchor_legacy" className="bg-blue-50/90 border-y-2 border-blue-300 font-sans">
+                            <td className="py-3 px-4 font-bold text-blue-900 flex items-center gap-1.5">【现价锚点】</td>
+                            <td className="py-3 px-4 text-base font-bold text-blue-900 font-mono">¥{current_price.toFixed(3)}</td>
+                            <td className="py-3 px-4"><span className="text-xs text-blue-800">基准</span></td>
+                            <td className="py-3 px-4 font-medium text-blue-800">持仓观察</td>
+                            <td className="py-3 px-4 font-bold text-blue-900 font-mono">底仓 {baseShares.toLocaleString()} 股</td>
+                            <td className="py-3 px-4 font-bold text-blue-900 font-mono">底仓 ¥{baseAmount.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                            <td className="py-3 px-4 text-blue-600 font-medium">T+1 轮动</td>
+                            <td className="py-3 px-4 text-blue-700 text-xs">50% 底仓</td>
+                            <td className="py-3 px-4 text-center text-blue-700 text-xs">基准</td>
                           </tr>
                         );
 
-                        // 3. 买入档位 (从高到低)
                         buyLevels.forEach((price, idx) => {
                           const levelNum = idx + 1;
                           const fundAmount = singleQty * price;
                           const copyText = `${symbolCode} 买入 价格:${price.toFixed(3)} 数量:${singleQty}股`;
                           const rowKey = `buy_${levelNum}`;
-
                           rows.push(
                             <tr key={rowKey} className="hover:bg-emerald-50/50 transition-colors">
-                              <td className="py-2.5 px-4 font-semibold text-emerald-700">
-                                买入 第-{levelNum}档
-                              </td>
-                              <td className="py-2.5 px-4 text-sm font-bold text-gray-900">
-                                ¥{price.toFixed(3)}
-                              </td>
+                              <td className="py-2.5 px-4 font-semibold text-emerald-700">买入 第-{levelNum}档</td>
+                              <td className="py-2.5 px-4 text-sm font-bold text-gray-900">¥{price.toFixed(3)}</td>
+                              <td className="py-2.5 px-4"><span className="text-gray-500">基础</span></td>
                               <td className="py-2.5 px-4">
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-800 font-sans">
                                   <ArrowDownRight className="w-3 h-3" /> 买入建仓
                                 </span>
                               </td>
-                              <td className="py-2.5 px-4 text-gray-800">
-                                {singleQty.toLocaleString()} 股
-                              </td>
-                              <td className="py-2.5 px-4 text-gray-600">
-                                ¥{fundAmount.toLocaleString(undefined, { maximumFractionDigits: 1 })}
-                              </td>
-                              <td className="py-2.5 px-4 text-gray-500 font-sans">
-                                等待低吸触发
-                              </td>
+                              <td className="py-2.5 px-4 text-gray-800">{singleQty.toLocaleString()} 股</td>
+                              <td className="py-2.5 px-4 text-gray-600">¥{fundAmount.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                              <td className="py-2.5 px-4 text-gray-500 font-sans">等待低吸</td>
+                              <td className="py-2.5 px-4"><span className="text-[10px] text-gray-400">-</span></td>
                               <td className="py-2.5 px-4 text-center">
                                 <button
                                   type="button"
                                   onClick={() => handleCopyOrder(rowKey, copyText)}
-                                  className="inline-flex items-center gap-1 text-[11px] font-sans px-2.5 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
-                                  title="复制挂单参数"
+                                  className="inline-flex items-center gap-1 text-[11px] font-sans px-2.5 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-100"
                                 >
-                                  {copiedKey === rowKey ? (
-                                    <span className="text-green-600 flex items-center gap-0.5">
-                                      <Check className="w-3 h-3" /> 已复制
-                                    </span>
-                                  ) : (
-                                    <span className="flex items-center gap-0.5">
-                                      <Copy className="w-3 h-3" /> 复制
-                                    </span>
-                                  )}
+                                  {copiedKey === rowKey ? <span className="text-green-600 flex items-center"><Check className="w-3 h-3" /> 已复制</span> : <span className="flex items-center"><Copy className="w-3 h-3" /> 复制</span>}
                                 </button>
                               </td>
                             </tr>
@@ -545,8 +928,10 @@ const GridParametersCard = ({
                   </table>
                 </div>
                 <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <span>💡 提示：每一档均已根据您的资金自动整倍按100股规整，点击右侧按钮可直接复制参数到券商软件条件单</span>
-                  <span className="font-semibold text-gray-700">共 {gridStrategy.price_levels.length} 个点位</span>
+                  <span>💡 提示：所有挂单股数已自动按整百股数（100股整数倍）对齐，点击单笔“复制”或右上角“一键复制条件单”可快速在券商 APP 设置</span>
+                  <span className="font-semibold text-gray-700">
+                    当前视图: {gridStrategy.composite_grid?.merged_ladder?.filter((o) => selectedRail === "all" || o.rail === selectedRail).length || gridStrategy.price_levels?.length || 0} 档
+                  </span>
                 </div>
               </div>
             )}

@@ -71,6 +71,13 @@ class ApiService {
   }
 
   /**
+   * 策略真实历史回测接口
+   */
+  async runBacktest(parameters) {
+    return this.post("/backtest", parameters);
+  }
+
+  /**
    * 获取ETF基础信息
    */
   async getETFInfo(etfCode) {
@@ -122,6 +129,7 @@ const apiService = new ApiService();
 
 // 导出常用方法
 export const analyzeETF = (parameters) => apiService.analyzeETF(parameters);
+export const runBacktest = (parameters) => apiService.runBacktest(parameters);
 export const getETFInfo = (etfCode) => apiService.getETFInfo(etfCode);
 export const getPopularETFs = () => apiService.getPopularETFs();
 export const validateETFCode = (etfCode) => apiService.validateETFCode(etfCode);
