@@ -7,6 +7,8 @@ import { DollarSign } from "lucide-react";
  */
 export default function CapitalInput({ value, onChange, error, presets = [] }) {
   const defaultPresets = [
+    { value: 30000, label: "3万", popular: true },
+    { value: 50000, label: "5万", popular: true },
     { value: 100000, label: "10万", popular: true },
     { value: 200000, label: "20万", popular: true },
     { value: 500000, label: "50万", popular: true },

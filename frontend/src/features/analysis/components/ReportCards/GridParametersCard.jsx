@@ -1,3 +1,4 @@
+import React, { useState } from "react";
 import {
   Grid3X3,
   DollarSign,
@@ -16,8 +17,14 @@ import {
   Activity,
   Shield,
   AlertTriangle,
+  Copy,
+  Check,
+  ArrowUpRight,
+  ArrowDownRight,
+  ListOrdered,
+  LayoutGrid
 } from "lucide-react";
-import { formatCurrency, formatPercent, formatDate } from "@shared/utils";
+import { formatCurrency, formatPercent, formatDate, formatTimestamp } from "@shared/utils";
 
 const GridParametersCard = ({
   gridStrategy,
@@ -38,14 +45,25 @@ const GridParametersCard = ({
     calculation_method,
   } = gridStrategy;
 
+  // 挂单视图模式：'ladder' 阶梯挂单清单（推荐）| 'matrix' 方块矩阵
+  const [viewMode, setViewMode] = useState("ladder");
+  // 复制反馈状态
+  const [copiedKey, setCopiedKey] = useState(null);
+
+  const handleCopyOrder = (key, text) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey(null), 2000);
+  };
+
   // 获取价格日期显示文本
   const getPriceDateText = () => {
     // 优先使用gridStrategy中的price_date（来自TushareClient::get_latest_price）
     const priceDate = gridStrategy?.price_date;
     if (priceDate) {
-      const formattedDate = formatDate(priceDate);
+      const formattedDate = formatTimestamp(priceDate);
       if (formattedDate) {
-        return `${formattedDate} 收盘价`;
+        return `更新时间 ${formattedDate}`;
       }
     }
 
@@ -54,7 +72,7 @@ const GridParametersCard = ({
     if (latestDate) {
       const formattedDate = formatDate(latestDate);
       if (formattedDate) {
-        return `${formattedDate} 收盘价`;
+        return `更新时间 ${formattedDate}`;
       }
     }
 
@@ -317,89 +335,238 @@ const GridParametersCard = ({
           </div>
         </div>
 
-        {/* 网格价格水平 */}
+        {/* 网格价格水平与做T挂单阶梯 */}
         {gridStrategy.price_levels && (
           <>
-            <div className="flex items-center gap-3 mb-4 mt-4">
-              <div className="p-2 bg-indigo-100 rounded-lg">
-                <BarChart3 className="w-5 h-5 text-indigo-600" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 mt-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <ListOrdered className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-gray-900 text-base">网格做T挂单执行阶梯</h4>
+                  <p className="text-xs text-gray-500">可直接对照在证券交易软件中设置条件单</p>
+                </div>
               </div>
-              <div>
-                <h4 className="font-semibold text-gray-900">网格买卖点位</h4>
-                <p className="text-sm text-gray-600">详细的买卖价格点位设置</p>
+
+              {/* 视图切换按钮 */}
+              <div className="flex items-center bg-gray-100 p-1 rounded-lg self-start sm:self-auto text-xs">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("ladder")}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-all ${
+                    viewMode === "ladder"
+                      ? "bg-white text-blue-700 shadow-xs"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  <ListOrdered className="w-3.5 h-3.5" />
+                  阶梯挂单表
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("matrix")}
+                  className={`flex items-center gap-1.5 px-3 py-1 rounded-md font-medium transition-all ${
+                    viewMode === "matrix"
+                      ? "bg-white text-blue-700 shadow-xs"
+                      : "text-gray-600 hover:text-gray-900"
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  矩阵方块
+                </button>
               </div>
             </div>
 
-            <div className="max-h-64 overflow-y-auto">
-              <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
-                {(() => {
-                  const maxDisplay = 21;
-                  const priceLevels = gridStrategy.price_levels;
+            {/* 模式一：纵向订单簿阶梯清单 */}
+            {viewMode === "ladder" && (
+              <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-xs">
+                <div className="overflow-x-auto max-h-96">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead className="bg-gray-50 text-gray-600 sticky top-0 z-10 border-b border-gray-200">
+                      <tr>
+                        <th className="py-2.5 px-4 font-semibold">档位</th>
+                        <th className="py-2.5 px-4 font-semibold">触发价格</th>
+                        <th className="py-2.5 px-4 font-semibold">交易动作</th>
+                        <th className="py-2.5 px-4 font-semibold">委托数量</th>
+                        <th className="py-2.5 px-4 font-semibold">资金占用</th>
+                        <th className="py-2.5 px-4 font-semibold">预计单网净利</th>
+                        <th className="py-2.5 px-4 font-semibold text-center">快捷操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 font-mono">
+                      {(() => {
+                        const priceLevels = gridStrategy.price_levels;
+                        const singleQty = fund_allocation?.single_trade_quantity || 1000;
+                        const expectedProfit = fund_allocation?.expected_profit_per_trade || (singleQty * current_price * 0.03);
+                        const baseShares = fund_allocation?.algorithm_details?.base_position_shares || fund_allocation?.base_position_shares || Math.round((fund_allocation?.base_position_amount || 50000) / current_price / 100) * 100;
+                        const baseAmount = fund_allocation?.base_position_amount || (baseShares * current_price);
+                        const symbolCode = inputParameters?.etfCode || "";
 
-                  // 如果网格点总数不超过25个，直接显示全部
-                  if (priceLevels.length <= maxDisplay) {
-                    return priceLevels.map((price, index) => (
-                      <div
-                        key={index}
-                        className={`p-2 text-center rounded text-sm ${
-                          price < current_price
-                            ? "bg-red-50 text-red-700 border border-red-200"
-                            : price > current_price
-                              ? "bg-green-50 text-green-700 border border-green-200"
-                              : "bg-yellow-50 text-yellow-700 border border-yellow-200"
-                        }`}
-                      >
-                        <div className="font-medium">¥{price.toFixed(3)}</div>
-                        <div className="text-xs opacity-75">
-                          {price < current_price
-                            ? "买入"
-                            : price > current_price
-                              ? "卖出"
-                              : "基准"}
-                        </div>
-                      </div>
-                    ));
-                  }
+                        // 分离为卖出、现价和买入
+                        const sellLevels = priceLevels.filter((p) => p > current_price).sort((a, b) => b - a);
+                        const buyLevels = priceLevels.filter((p) => p < current_price).sort((a, b) => b - a);
 
-                  // 找到当前价格在数组中的位置（最接近的价格点）
-                  let centerIndex = 0;
-                  let minDiff = Math.abs(priceLevels[0] - current_price);
+                        const rows = [];
 
-                  for (let i = 1; i < priceLevels.length; i++) {
-                    const diff = Math.abs(priceLevels[i] - current_price);
-                    if (diff < minDiff) {
-                      minDiff = diff;
-                      centerIndex = i;
-                    }
-                  }
+                        // 1. 卖出档位 (从高到低)
+                        sellLevels.forEach((price, idx) => {
+                          const levelNum = sellLevels.length - idx;
+                          const fundAmount = singleQty * price;
+                          const copyText = `${symbolCode} 卖出 价格:${price.toFixed(3)} 数量:${singleQty}股`;
+                          const rowKey = `sell_${levelNum}`;
 
-                  // 计算显示范围，以中心点向两边扩展
-                  const halfDisplay = Math.floor(maxDisplay / 2);
-                  let startIndex = Math.max(0, centerIndex - halfDisplay);
-                  let endIndex = Math.min(
-                    priceLevels.length,
-                    startIndex + maxDisplay,
-                  );
+                          rows.push(
+                            <tr key={rowKey} className="hover:bg-amber-50/50 transition-colors">
+                              <td className="py-2.5 px-4 font-semibold text-amber-700">
+                                卖出 第+{levelNum}档
+                              </td>
+                              <td className="py-2.5 px-4 text-sm font-bold text-gray-900">
+                                ¥{price.toFixed(3)}
+                              </td>
+                              <td className="py-2.5 px-4">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 font-sans">
+                                  <ArrowUpRight className="w-3 h-3" /> 卖出底仓做T
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-4 text-gray-800">
+                                {singleQty.toLocaleString()} 股
+                              </td>
+                              <td className="py-2.5 px-4 text-gray-600">
+                                ¥{fundAmount.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                              </td>
+                              <td className="py-2.5 px-4 text-red-600 font-semibold font-sans">
+                                +¥{expectedProfit.toFixed(1)}
+                              </td>
+                              <td className="py-2.5 px-4 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyOrder(rowKey, copyText)}
+                                  className="inline-flex items-center gap-1 text-[11px] font-sans px-2.5 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                                  title="复制挂单参数"
+                                >
+                                  {copiedKey === rowKey ? (
+                                    <span className="text-green-600 flex items-center gap-0.5">
+                                      <Check className="w-3 h-3" /> 已复制
+                                    </span>
+                                  ) : (
+                                    <span className="flex items-center gap-0.5">
+                                      <Copy className="w-3 h-3" /> 复制
+                                    </span>
+                                  )}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        });
 
-                  // 如果末尾不够，向前调整起始位置
-                  if (endIndex - startIndex < maxDisplay) {
-                    startIndex = Math.max(0, endIndex - maxDisplay);
-                  }
+                        // 2. 当前基准价格锚点行
+                        rows.push(
+                          <tr key="current_anchor" className="bg-blue-50/90 border-y-2 border-blue-300 font-sans">
+                            <td className="py-3 px-4 font-bold text-blue-900 flex items-center gap-1.5">
+                              <span className="inline-block w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+                              【现价锚点】
+                            </td>
+                            <td className="py-3 px-4 text-base font-bold text-blue-900 font-mono">
+                              ¥{current_price.toFixed(3)}
+                            </td>
+                            <td className="py-3 px-4 font-medium text-blue-800">
+                              持仓观察 / 底仓基准线
+                            </td>
+                            <td className="py-3 px-4 font-bold text-blue-900 font-mono">
+                              底仓 {baseShares.toLocaleString()} 股
+                            </td>
+                            <td className="py-3 px-4 font-bold text-blue-900 font-mono">
+                              底仓 ¥{baseAmount.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                            </td>
+                            <td className="py-3 px-4 text-blue-600 font-medium">
+                              T+1 轮动底仓
+                            </td>
+                            <td className="py-3 px-4 text-center text-blue-700 text-xs">
+                              基准水位
+                            </td>
+                          </tr>
+                        );
 
-                  const displayLevels = priceLevels.slice(startIndex, endIndex);
+                        // 3. 买入档位 (从高到低)
+                        buyLevels.forEach((price, idx) => {
+                          const levelNum = idx + 1;
+                          const fundAmount = singleQty * price;
+                          const copyText = `${symbolCode} 买入 价格:${price.toFixed(3)} 数量:${singleQty}股`;
+                          const rowKey = `buy_${levelNum}`;
 
-                  return displayLevels.map((price, index) => (
+                          rows.push(
+                            <tr key={rowKey} className="hover:bg-emerald-50/50 transition-colors">
+                              <td className="py-2.5 px-4 font-semibold text-emerald-700">
+                                买入 第-{levelNum}档
+                              </td>
+                              <td className="py-2.5 px-4 text-sm font-bold text-gray-900">
+                                ¥{price.toFixed(3)}
+                              </td>
+                              <td className="py-2.5 px-4">
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-800 font-sans">
+                                  <ArrowDownRight className="w-3 h-3" /> 买入建仓
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-4 text-gray-800">
+                                {singleQty.toLocaleString()} 股
+                              </td>
+                              <td className="py-2.5 px-4 text-gray-600">
+                                ¥{fundAmount.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                              </td>
+                              <td className="py-2.5 px-4 text-gray-500 font-sans">
+                                等待低吸触发
+                              </td>
+                              <td className="py-2.5 px-4 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopyOrder(rowKey, copyText)}
+                                  className="inline-flex items-center gap-1 text-[11px] font-sans px-2.5 py-1 rounded border border-gray-200 text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                                  title="复制挂单参数"
+                                >
+                                  {copiedKey === rowKey ? (
+                                    <span className="text-green-600 flex items-center gap-0.5">
+                                      <Check className="w-3 h-3" /> 已复制
+                                    </span>
+                                  ) : (
+                                    <span className="flex items-center gap-0.5">
+                                      <Copy className="w-3 h-3" /> 复制
+                                    </span>
+                                  )}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        });
+
+                        return rows;
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="p-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-500 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <span>💡 提示：每一档均已根据您的资金自动整倍按100股规整，点击右侧按钮可直接复制参数到券商软件条件单</span>
+                  <span className="font-semibold text-gray-700">共 {gridStrategy.price_levels.length} 个点位</span>
+                </div>
+              </div>
+            )}
+
+            {/* 模式二：方块矩阵紧凑视图 */}
+            {viewMode === "matrix" && (
+              <div className="max-h-64 overflow-y-auto">
+                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
+                  {gridStrategy.price_levels.map((price, index) => (
                     <div
-                      key={startIndex + index}
+                      key={index}
                       className={`p-2 text-center rounded text-sm ${
                         price < current_price
-                          ? "bg-red-50 text-red-700 border border-red-200"
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                           : price > current_price
-                            ? "bg-green-50 text-green-700 border border-green-200"
-                            : "bg-yellow-50 text-yellow-700 border border-yellow-200"
+                            ? "bg-amber-50 text-amber-700 border border-amber-200"
+                            : "bg-blue-50 text-blue-700 border border-blue-200"
                       }`}
                     >
-                      <div className="font-medium">¥{price.toFixed(3)}</div>
+                      <div className="font-medium font-mono">¥{price.toFixed(3)}</div>
                       <div className="text-xs opacity-75">
                         {price < current_price
                           ? "买入"
@@ -408,16 +575,10 @@ const GridParametersCard = ({
                             : "基准"}
                       </div>
                     </div>
-                  ));
-                })()}
-              </div>
-              {gridStrategy.price_levels.length > 21 && (
-                <div className="text-center mt-3 text-sm text-gray-500">
-                  显示以当前价格为中心的20个价格水平，共
-                  {gridStrategy.price_levels.length - 1}个网格点
+                  ))}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </>
         )}
       </div>

@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 import logging
 from datetime import datetime, timedelta
 
-from ..data.tushare_client import TushareClient
+from ..data.akshare_client import AkShareClient
 from algorithms.atr.analyzer import ATRAnalyzer
 from algorithms.atr.calculator import ATRCalculator
 from algorithms.grid.arithmetic_grid import ArithmeticGridCalculator
@@ -38,7 +38,7 @@ class ETFAnalysisService:
             grid_optimizer: 网格优化器实例
             suitability_analyzer: 适宜度分析器实例
         """
-        self.tushare_client = TushareClient()
+        self.akshare_client = AkShareClient()
         
         # 使用依赖注入或创建默认实例
         self.atr_analyzer = atr_analyzer or ATRAnalyzer(ATRCalculator())
@@ -47,27 +47,35 @@ class ETFAnalysisService:
         self.grid_optimizer = grid_optimizer or GridOptimizer()
         self.suitability_analyzer = suitability_analyzer or SuitabilityAnalyzer()
         
-        # 热门ETF列表
+        # 热门ETF列表 (涵盖宽基指数、稳定行业与景气行业核心标的)
         self.popular_etfs = [
-            {'code': '510300', 'name': '沪深300ETF'},
-            {'code': '510500', 'name': '中证500ETF'},
-            {'code': '159919', 'name': '沪深300ETF'},
-            {'code': '159915', 'name': '创业板ETF'},
-            {'code': '512880', 'name': '证券ETF'},
-            {'code': '515050', 'name': '5G通信ETF'},
-            {'code': '512690', 'name': '酒ETF'},
-            {'code': '516160', 'name': '新能源ETF'},
-            {'code': '159928', 'name': '消费ETF'},
-            {'code': '512170', 'name': '医疗ETF'},
-            {'code': '159941', 'name': '纳指ETF'},
-            {'code': '513100', 'name': '纳指ETF'},
-            {'code': '159920', 'name': '恒生ETF'},
-            {'code': '510880', 'name': '红利ETF'},
-            {'code': '588000', 'name': '科创50ETF'},
-            {'code': '512480', 'name': '半导体ETF'},
-            {'code': '159819', 'name': '人工智能ETF'},
-            {'code': '159742', 'name': '恒生科技ETF'},
-            {'code': '159949', 'name': '创业板50ETF'}
+            {'code': '510300', 'name': '沪深300ETF (华泰柏瑞)'},
+            {'code': '510500', 'name': '中证500ETF (南方)'},
+            {'code': '512100', 'name': '中证1000ETF (南方)'},
+            {'code': '560510', 'name': '中证A500ETF (国泰)'},
+            {'code': '159915', 'name': '创业板ETF (易方达)'},
+            {'code': '588000', 'name': '科创50ETF (华夏)'},
+            {'code': '513130', 'name': '恒生科技ETF (华泰柏瑞)'},
+            {'code': '513100', 'name': '纳指100ETF (国泰)'},
+            {'code': '515220', 'name': '煤炭ETF (国泰)'},
+            {'code': '512890', 'name': '红利低波ETF (华泰柏瑞)'},
+            {'code': '512800', 'name': '银行ETF (华宝)'},
+            {'code': '159301', 'name': '公用事业ETF (华夏)'},
+            {'code': '159666', 'name': '交通运输ETF (华夏)'},
+            {'code': '159995', 'name': '芯片ETF (华夏)'},
+            {'code': '512480', 'name': '半导体ETF (国联安)'},
+            {'code': '588200', 'name': '科创芯片ETF (嘉实)'},
+            {'code': '159819', 'name': '人工智能ETF (易方达)'},
+            {'code': '515070', 'name': '人工智能ETF (华夏)'},
+            {'code': '515790', 'name': '光伏ETF'},
+            {'code': '159755', 'name': '电池ETF'},
+            {'code': '516160', 'name': '新能源ETF (南方)'},
+            {'code': '512010', 'name': '医药ETF (易方达)'},
+            {'code': '516080', 'name': '创新药ETF (易方达)'},
+            {'code': '159770', 'name': '机器人ETF'},
+            {'code': '562570', 'name': '信创ETF (华夏)'},
+            {'code': '515050', 'name': '5G通信ETF (华夏)'},
+            {'code': '159241', 'name': '航空航天ETF (天弘)'}
         ]
     
     def get_popular_etfs(self) -> List[Dict]:
@@ -86,22 +94,22 @@ class ETFAnalysisService:
         """
         try:
             # 获取基础信息（使用增强缓存）
-            basic_info = self.tushare_client.get_etf_basic_info(etf_code)
+            basic_info = self.akshare_client.get_etf_basic_info(etf_code)
             if not basic_info:
                 raise ValueError(f"未找到ETF代码: {etf_code}")
             
             # 获取最新价格（使用增强缓存）
-            price_data = self.tushare_client.get_latest_price(etf_code)
+            price_data = self.akshare_client.get_latest_price(etf_code)
             if not price_data:
                 raise ValueError(f"未获取到ETF价格数据: {etf_code}")
             
             # 获取ETF名称（使用增强缓存）
-            etf_name = self.tushare_client.get_etf_name(etf_code)
+            etf_name = price_data.get('etf_name', '') or self.akshare_client.get_etf_name(etf_code)
             
             # 整合信息
             etf_info = {
                 'code': etf_code,
-                'name': etf_name or basic_info.get('name', '未知'),
+                'name': etf_name or f'ETF {etf_code}',
                 'management_company': basic_info.get('management', '未知'),
                 'current_price': price_data.get('current_price', 0),
                 'change_pct': price_data.get('pct_change', 0),
@@ -110,8 +118,8 @@ class ETFAnalysisService:
                 'setup_date': basic_info.get('found_date', ''),
                 'list_date': basic_info.get('list_date', ''),
                 'fund_type': 'ETF',
-                'status': 'L',
                 'trade_date': price_data.get('trade_date', ''),
+                'trade_timestamp': price_data.get('timestamp', ''),
                 'data_age_days': price_data.get('data_age_days', 0)
             }
             
@@ -139,7 +147,7 @@ class ETFAnalysisService:
             start_date = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
             
             # 获取历史数据（使用增强缓存）
-            df = self.tushare_client.get_etf_daily_data(etf_code, start_date, end_date)
+            df = self.akshare_client.get_etf_daily_data(etf_code, start_date, end_date)
             if df is None or len(df) == 0:
                 raise ValueError(f"未获取到历史数据: {etf_code}")
             
@@ -186,8 +194,8 @@ class ETFAnalysisService:
             # 2. 获取历史数据（1年）
             df = self.get_historical_data(etf_code, days=365)
             
-            # 3. 获取最新价格信息（使用TushareClient的get_latest_price接口）
-            latest_price_info = self.tushare_client.get_latest_price(etf_code)
+            # 3. 获取最新价格信息
+            latest_price_info = self.akshare_client.get_latest_price(etf_code)
             if not latest_price_info:
                 raise ValueError(f"未获取到ETF最新价格: {etf_code}")
             
@@ -434,7 +442,7 @@ class ETFAnalysisService:
             
             result = {
                 'current_price': current_price,
-                'price_date': latest_price_info.get('trade_date', ''),  # 添加价格对应的交易日期
+                'price_date': latest_price_info.get('timestamp', ''),  # 价格数据更新时间
                 'price_range': {
                     'lower': round(price_lower, 3),
                     'upper': round(price_upper, 3),
