@@ -81,6 +81,12 @@ class AkShareClient:
             
         except Exception as e:
             logger.error(f"✗ 请求AkShare接口失败，ETF {etf_code} 日线数据获取失败: {str(e)}")
+            df = self._get_fallback_kline(etf_code)
+            if df is not None and not df.empty:
+                cache_data = df.to_dict('records')
+                self.cache.set_historical_cache(etf_code, start_date, end_date, cache_data)
+                logger.info(f"✓ 通过备用源获取ETF {etf_code} 日线数据成功，共{len(df)}条记录")
+                return df
             return None
     
     def get_etf_basic_info(self, etf_code: str) -> Optional[Dict]:
@@ -126,6 +132,15 @@ class AkShareClient:
             
         except Exception as e:
             logger.error(f"✗ 请求AkShare接口失败，ETF {etf_code} 基本信息获取失败: {str(e)}")
+            fallback = self._get_fallback_quote(etf_code)
+            if fallback:
+                basic_info = {
+                    'ts_code': f"{etf_code}.{self._get_market_suffix(etf_code)}",
+                    'name': fallback['name'],
+                    'management': '公募基金'
+                }
+                self.cache.set_permanent_cache("etf_basic", etf_code, basic_info)
+                return basic_info
             return None
     
     def get_latest_price(self, etf_code: str) -> Optional[Dict]:
@@ -269,6 +284,11 @@ class AkShareClient:
             
         except Exception as e:
             logger.error(f"✗ 请求AkShare接口失败，ETF {etf_code} 最新价格获取失败: {str(e)}")
+            fallback = self._get_fallback_quote(etf_code)
+            if fallback:
+                self.cache.set_daily_cache(latest_trading_date, "price", etf_code, fallback)
+                logger.info(f"✓ 通过备用行情源获取ETF {etf_code} 最新价格成功")
+                return fallback
             return None
     
     
@@ -630,3 +650,75 @@ class AkShareClient:
             date = date - timedelta(days=1)
         
         return date.strftime('%Y%m%d')
+
+    def _get_fallback_quote(self, etf_code: str) -> Optional[Dict]:
+        """备用实时行情源 (腾讯财经)"""
+        try:
+            import requests
+            code = etf_code.split('.')[0]
+            prefix = 'sh' if code.startswith(('5', '6')) else 'sz'
+            resp = requests.get(f'http://qt.gtimg.cn/q={prefix}{code}', timeout=5)
+            resp.encoding = 'gbk'
+            if '~' not in resp.text:
+                return None
+            parts = resp.text.split('~')
+            if len(parts) < 45:
+                return None
+            return {
+                'name': parts[1],
+                'etf_name': parts[1],
+                'current_price': float(parts[3]),
+                'pre_close': float(parts[4]),
+                'open_price': float(parts[5]),
+                'high_price': float(parts[33]),
+                'low_price': float(parts[34]),
+                'change_amount': float(parts[31]),
+                'pct_change': float(parts[32]),
+                'amplitude': float(parts[43]),
+                'volume': int(float(parts[6])),
+                'amount': float(parts[37]) * 10000,
+                'turnover_rate': float(parts[38]) if parts[38] else 0.0,
+                'volume_ratio': 1.0,
+                'iopv': float(parts[3]),
+                'trading_date': self.get_latest_trading_date()
+            }
+        except Exception as e:
+            logger.warning(f"备用行情获取失败: {str(e)}")
+            return None
+
+    def _get_fallback_kline(self, etf_code: str, days: int = 90) -> Optional[pd.DataFrame]:
+        """备用K线源 (腾讯财经)"""
+        try:
+            import requests
+            code = etf_code.split('.')[0]
+            prefix = 'sh' if code.startswith(('5', '6')) else 'sz'
+            url = f'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},day,,,{days},qfq'
+            res = requests.get(url, timeout=5).json()
+            item = res.get('data', {}).get(f'{prefix}{code}', {})
+            raw_data = item.get('qfqday', item.get('day', []))
+            if not raw_data:
+                return None
+            records = []
+            for row in raw_data:
+                o_price = float(row[1])
+                c_price = float(row[2])
+                h_price = float(row[3])
+                l_price = float(row[4])
+                vol_val = float(row[5])
+                # 估算成交额 (vol_val以手为单位，1手=100股，折算为成交金额元)
+                avg_p = (o_price + c_price) / 2.0 if (o_price + c_price) > 0 else c_price
+                calc_amount = vol_val * 100.0 * avg_p
+                records.append({
+                    'trade_date': pd.to_datetime(row[0]),
+                    'open': o_price,
+                    'close': c_price,
+                    'high': h_price,
+                    'low': l_price,
+                    'vol': vol_val,
+                    'amount': calc_amount,
+                    'pct_chg': round((c_price - o_price) / o_price * 100, 2) if o_price > 0 else 0.0
+                })
+            return pd.DataFrame(records)
+        except Exception as e:
+            logger.warning(f"备用K线获取失败: {str(e)}")
+            return None

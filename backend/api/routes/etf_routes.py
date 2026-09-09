@@ -62,6 +62,8 @@ def get_capital_presets():
     """获取预设资金选项"""
     try:
         capital_presets = [
+            {'value': 30000, 'label': '3万', 'popular': True},
+            {'value': 50000, 'label': '5万', 'popular': True},
             {'value': 100000, 'label': '10万', 'popular': True},
             {'value': 200000, 'label': '20万', 'popular': True},
             {'value': 300000, 'label': '30万', 'popular': False},

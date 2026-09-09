@@ -47,27 +47,35 @@ class ETFAnalysisService:
         self.grid_optimizer = grid_optimizer or GridOptimizer()
         self.suitability_analyzer = suitability_analyzer or SuitabilityAnalyzer()
         
-        # 热门ETF列表
+        # 热门ETF列表 (涵盖宽基指数、稳定行业与景气行业核心标的)
         self.popular_etfs = [
-            {'code': '510300', 'name': '沪深300ETF'},
-            {'code': '510500', 'name': '中证500ETF'},
-            {'code': '159919', 'name': '沪深300ETF'},
-            {'code': '159915', 'name': '创业板ETF'},
-            {'code': '512880', 'name': '证券ETF'},
-            {'code': '515050', 'name': '5G通信ETF'},
-            {'code': '512690', 'name': '酒ETF'},
-            {'code': '516160', 'name': '新能源ETF'},
-            {'code': '159928', 'name': '消费ETF'},
-            {'code': '512170', 'name': '医疗ETF'},
-            {'code': '159941', 'name': '纳指ETF'},
-            {'code': '513100', 'name': '纳指ETF'},
-            {'code': '159920', 'name': '恒生ETF'},
-            {'code': '510880', 'name': '红利ETF'},
-            {'code': '588000', 'name': '科创50ETF'},
-            {'code': '512480', 'name': '半导体ETF'},
-            {'code': '159819', 'name': '人工智能ETF'},
-            {'code': '159742', 'name': '恒生科技ETF'},
-            {'code': '159949', 'name': '创业板50ETF'}
+            {'code': '510300', 'name': '沪深300ETF (华泰柏瑞)'},
+            {'code': '510500', 'name': '中证500ETF (南方)'},
+            {'code': '512100', 'name': '中证1000ETF (南方)'},
+            {'code': '560510', 'name': '中证A500ETF (国泰)'},
+            {'code': '159915', 'name': '创业板ETF (易方达)'},
+            {'code': '588000', 'name': '科创50ETF (华夏)'},
+            {'code': '513130', 'name': '恒生科技ETF (华泰柏瑞)'},
+            {'code': '513100', 'name': '纳指100ETF (国泰)'},
+            {'code': '515220', 'name': '煤炭ETF (国泰)'},
+            {'code': '512890', 'name': '红利低波ETF (华泰柏瑞)'},
+            {'code': '512800', 'name': '银行ETF (华宝)'},
+            {'code': '159301', 'name': '公用事业ETF (华夏)'},
+            {'code': '159666', 'name': '交通运输ETF (华夏)'},
+            {'code': '159995', 'name': '芯片ETF (华夏)'},
+            {'code': '512480', 'name': '半导体ETF (国联安)'},
+            {'code': '588200', 'name': '科创芯片ETF (嘉实)'},
+            {'code': '159819', 'name': '人工智能ETF (易方达)'},
+            {'code': '515070', 'name': '人工智能ETF (华夏)'},
+            {'code': '515790', 'name': '光伏ETF'},
+            {'code': '159755', 'name': '电池ETF'},
+            {'code': '516160', 'name': '新能源ETF (南方)'},
+            {'code': '512010', 'name': '医药ETF (易方达)'},
+            {'code': '516080', 'name': '创新药ETF (易方达)'},
+            {'code': '159770', 'name': '机器人ETF'},
+            {'code': '562570', 'name': '信创ETF (华夏)'},
+            {'code': '515050', 'name': '5G通信ETF (华夏)'},
+            {'code': '159241', 'name': '航空航天ETF (天弘)'}
         ]
     
     def get_popular_etfs(self) -> List[Dict]:
