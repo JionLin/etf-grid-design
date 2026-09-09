@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Settings } from "lucide-react";
+import { Settings, Clock, Calendar } from "lucide-react";
 import { usePersistedState } from "@shared/hooks";
 import { validateETFCode, validateCapital } from "@shared/utils/validation";
 import { checkDisclaimerStatus, acceptDisclaimer } from "@shared/utils/disclaimer";
@@ -35,6 +35,10 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
   const [adjustmentCoefficient, setAdjustmentCoefficient] = usePersistedState(
     "adjustmentCoefficient",
     initialValues?.adjustmentCoefficient || 1.0,
+  );
+  const [analysisDays, setAnalysisDays] = usePersistedState(
+    "analysisDays",
+    initialValues?.analysisDays || 180,
   );
 
   const [popularETFs, setPopularETFs] = useState([]);
@@ -172,6 +176,7 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
       gridType,
       riskPreference,
       adjustmentCoefficient: parseFloat(adjustmentCoefficient),
+      analysisDays: parseInt(analysisDays, 10) || 180,
     };
 
     // 检查用户是否需要重新确认免责声明
@@ -235,6 +240,57 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
           error={errors.totalCapital}
           presets={capitalPresets}
         />
+
+        {/* 历史分析周期选择器 */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <Clock className="w-4 h-4 text-blue-600" />
+              历史分析周期
+            </label>
+            <span className="text-xs text-gray-500 font-normal">
+              {analysisDays === 180 ? "★ 推荐黄金平衡 (半年跨度)" : analysisDays === 90 ? "⚡ 短线高频波动" : "🛡️ 52周大箱体"}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              type="button"
+              onClick={() => setAnalysisDays(90)}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-center transition-all ${
+                analysisDays === 90
+                  ? "bg-blue-50/90 border-blue-500 text-blue-700 ring-2 ring-blue-400/50 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs">90 天</div>
+              <div className="text-[10px] opacity-75 mt-0.5">高频做T · 灵敏</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAnalysisDays(180)}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-center transition-all ${
+                analysisDays === 180
+                  ? "bg-blue-50/90 border-blue-500 text-blue-700 ring-2 ring-blue-400/50 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs">180 天 (默认)</div>
+              <div className="text-[10px] opacity-75 mt-0.5">★ 黄金平衡 · 半年</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAnalysisDays(365)}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-center transition-all ${
+                analysisDays === 365
+                  ? "bg-blue-50/90 border-blue-500 text-blue-700 ring-2 ring-blue-400/50 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs">365 天</div>
+              <div className="text-[10px] opacity-75 mt-0.5">年度大箱体 · 防守</div>
+            </button>
+          </div>
+        </div>
 
         {/* 提交按钮 */}
         <div className="pt-2">

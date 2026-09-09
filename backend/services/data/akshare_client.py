@@ -23,7 +23,7 @@ class AkShareClient:
         
         logger.info("AkShare客户端初始化成功（增强缓存版本）")
     
-    def get_etf_daily_data(self, etf_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+    def get_etf_daily_data(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
         """
         获取ETF日线数据（历史数据范围缓存）
         
@@ -81,7 +81,7 @@ class AkShareClient:
             
         except Exception as e:
             logger.error(f"✗ 请求AkShare接口失败，ETF {etf_code} 日线数据获取失败: {str(e)}")
-            df = self._get_fallback_kline(etf_code)
+            df = self._get_fallback_kline(etf_code, days=days)
             if df is not None and not df.empty:
                 cache_data = df.to_dict('records')
                 self.cache.set_historical_cache(etf_code, start_date, end_date, cache_data)
@@ -686,7 +686,7 @@ class AkShareClient:
             logger.warning(f"备用行情获取失败: {str(e)}")
             return None
 
-    def _get_fallback_kline(self, etf_code: str, days: int = 90) -> Optional[pd.DataFrame]:
+    def _get_fallback_kline(self, etf_code: str, days: int = 180) -> Optional[pd.DataFrame]:
         """备用K线源 (腾讯财经)"""
         try:
             import requests

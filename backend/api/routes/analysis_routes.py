@@ -69,9 +69,14 @@ def analyze_etf_strategy():
                 'error': '调节系数应在0.0-2.0之间'
             }), 400
         
+        # 获取分析周期天数（可选参数，默认180天，支持90/180/365）
+        analysis_days = int(data.get('analysisDays', 180))
+        if analysis_days not in [90, 180, 365]:
+            analysis_days = 180
+        
         from flask import current_app
         current_app.logger.info(f"开始分析ETF策略: {etf_code}, 资金{total_capital}, "
-                   f"{grid_type}网格, {risk_preference}")
+                   f"{grid_type}网格, {risk_preference}, 周期{analysis_days}天")
         
         # 执行分析
         analysis_result = etf_service.analyze_etf_strategy(
@@ -79,7 +84,8 @@ def analyze_etf_strategy():
             total_capital=total_capital,
             grid_type=grid_type,
             risk_preference=risk_preference,
-            adjustment_coefficient=adjustment_coefficient
+            adjustment_coefficient=adjustment_coefficient,
+            analysis_days=analysis_days
         )
         
         current_app.logger.info(f"ETF策略分析完成: {etf_code}, "

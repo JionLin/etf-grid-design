@@ -147,7 +147,7 @@ class ETFAnalysisService:
             start_date = (datetime.now() - timedelta(days=days)).strftime('%Y%m%d')
             
             # 获取历史数据（使用增强缓存）
-            df = self.akshare_client.get_etf_daily_data(etf_code, start_date, end_date)
+            df = self.akshare_client.get_etf_daily_data(etf_code, start_date, end_date, days=days)
             if df is None or len(df) == 0:
                 raise ValueError(f"未获取到历史数据: {etf_code}")
             
@@ -171,7 +171,8 @@ class ETFAnalysisService:
     
     def analyze_etf_strategy(self, etf_code: str, total_capital: float,
                            grid_type: str, risk_preference: str,
-                           adjustment_coefficient: float = 1.0) -> Dict:
+                           adjustment_coefficient: float = 1.0,
+                           analysis_days: int = 180) -> Dict:
         """
         完整的ETF网格交易策略分析
         
@@ -180,19 +181,21 @@ class ETFAnalysisService:
             total_capital: 总投资资金
             grid_type: 网格类型 ('等差' 或 '等比')
             risk_preference: 频率偏好 ('低频', '均衡', '高频')
+            adjustment_coefficient: 调节系数 (默认1.0)
+            analysis_days: 分析周期天数 (默认180天)
             
         Returns:
             完整的策略分析报告
         """
         try:
             logger.info(f"开始ETF策略分析: {etf_code}, 资金{total_capital}, "
-                       f"{grid_type}网格, {risk_preference}, 调节系数{adjustment_coefficient}")
+                       f"{grid_type}网格, {risk_preference}, 调节系数{adjustment_coefficient}, 周期{analysis_days}天")
             
             # 1. 获取ETF基础信息
             etf_info = self.get_etf_basic_info(etf_code)
             
-            # 2. 获取历史数据（1年）
-            df = self.get_historical_data(etf_code, days=365)
+            # 2. 获取历史数据（根据指定天数，默认180天）
+            df = self.get_historical_data(etf_code, days=analysis_days)
             
             # 3. 获取最新价格信息
             latest_price_info = self.akshare_client.get_latest_price(etf_code)
