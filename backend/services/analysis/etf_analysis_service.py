@@ -178,7 +178,8 @@ class ETFAnalysisService:
                            adjustment_coefficient: float = 1.0,
                            analysis_days: int = 180,
                            scaling_ratio: float = 0.0,
-                           step_mode: str = 'atr') -> Dict:
+                           step_mode: str = 'atr',
+                           benchmark_price: Optional[float] = None) -> Dict:
         """
         完整的ETF网格交易策略分析
         
@@ -225,6 +226,7 @@ class ETFAnalysisService:
                 adjustment_coefficient=adjustment_coefficient,
                 scaling_ratio=scaling_ratio,
                 step_mode=step_mode,
+                benchmark_price=benchmark_price,
             )
             
             # 5. 生成策略分析依据
@@ -263,6 +265,8 @@ class ETFAnalysisService:
                     'scalingRatio': scaling_ratio,
                     'step_mode': step_mode,
                     'stepMode': step_mode,
+                    'benchmark_price': benchmark_price,
+                    'benchmarkPrice': benchmark_price,
                 }
             }
             
@@ -403,7 +407,8 @@ class ETFAnalysisService:
                                  total_capital: float, grid_type: str,
                                  risk_preference: str, adjustment_coefficient: float = 1.0,
                                  scaling_ratio: float = 0.0,
-                                 step_mode: str = 'atr') -> Dict:
+                                 step_mode: str = 'atr',
+                                 benchmark_price: Optional[float] = None) -> Dict:
         """
         计算网格策略参数（使用算法模块）
         
@@ -414,6 +419,7 @@ class ETFAnalysisService:
             total_capital: 总投资资金
             grid_type: 网格类型
             risk_preference: 频率偏好
+            benchmark_price: 用户自定义基准价格 (可选，指定时以此价格为中心锚点铺设网格)
             
         Returns:
             网格策略参数
@@ -422,59 +428,63 @@ class ETFAnalysisService:
             atr_ratio = atr_analysis['current_atr_ratio']
 
             current_price = float(latest_price_info['current_price'])
+            # 若用户指定了自定义基准价格且大于0，则使用自定义基准价格作为中心锚点 P0
+            anchor_price = float(benchmark_price) if (benchmark_price is not None and float(benchmark_price) > 0) else current_price
             
-            # 1. 计算价格区间（基于ATR、频率偏好和调节系数）
+            # 1. 计算价格区间（基于ATR、频率偏好和调节系数，以 anchor_price 为中心）
             price_lower, price_upper = self.atr_analyzer.calculate_price_range(
-                current_price, atr_ratio, risk_preference, adjustment_coefficient
+                anchor_price, atr_ratio, risk_preference, adjustment_coefficient
             )
             
             # 2. 基于ATR计算最优步长
             step_size, step_ratio = self.grid_optimizer.calculate_optimal_step_size(
-                atr_ratio, current_price, risk_preference, adjustment_coefficient
+                atr_ratio, anchor_price, risk_preference, adjustment_coefficient
             )
             
             
             if grid_type == '等差':
                 # 3. 基于步长计算网格数量
                 grid_count = self.arithmetic_calculator.calculate_grid_count_from_step(
-                    price_lower, price_upper, step_size, current_price
+                    price_lower, price_upper, step_size, anchor_price
                 )
                 # 4. 计算价格水平
                 price_levels = self.arithmetic_calculator.calculate_grid_levels(
-                    price_lower, price_upper, step_size, current_price
+                    price_lower, price_upper, step_size, anchor_price
                 )
             else:  # 等比网格
                 # 3. 基于步长计算网格数量
                 grid_count = self.geometric_calculator.calculate_grid_count_from_step(
-                    price_lower, price_upper, step_size, current_price
+                    price_lower, price_upper, step_size, anchor_price
                 )
                 # 4. 计算价格水平
                 price_levels = self.geometric_calculator.calculate_grid_levels(
-                    price_lower, price_upper, step_size, current_price
+                    price_lower, price_upper, step_size, anchor_price
                 )
             
-            # 5. 使用新的资金分配算法（不依赖外部底仓比例）
+            # 5. 使用新的资金分配算法（以 anchor_price 测算）
             fund_allocation = self.grid_optimizer.calculate_fund_allocation_v2(
-                total_capital, price_levels, current_price
+                total_capital, price_levels, anchor_price
             )
             
             # 7. 计算价格区间比例
-            price_range_ratio = (price_upper - price_lower) / current_price
+            price_range_ratio = (price_upper - price_lower) / anchor_price
             
             # 8. ATR评分
             atr_score, atr_description = self.atr_analyzer.get_atr_score(atr_ratio)
 
-            # 9. 计算大中小三层复合网格 (20%:35%:45% 分层多轨与合并阶梯)
+            # 9. 计算大中小三层复合网格 (以 anchor_price 为中心铺设)
             composite_steps = self.grid_optimizer.calculate_composite_steps(
-                current_price, atr_ratio, adjustment_coefficient, step_mode=step_mode
+                anchor_price, atr_ratio, adjustment_coefficient, step_mode=step_mode
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
-                total_capital, current_price, composite_steps, base_position_ratio=0.5,
+                total_capital, anchor_price, composite_steps, base_position_ratio=0.5,
                 scaling_ratio=scaling_ratio
             )
             
             result = {
                 'current_price': current_price,
+                'benchmark_price': anchor_price,
+                'is_custom_benchmark': round(anchor_price, 4) != round(current_price, 4),
                 'price_date': latest_price_info.get('timestamp', ''),  # 价格数据更新时间
                 'price_range': {
                     'lower': round(price_lower, 3),

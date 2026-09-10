@@ -43,6 +43,13 @@ const StressTestSandboxCard = ({
     return null;
   }
 
+  const buyOrders = (compositeGrid.merged_ladder || []).filter((item) => item.action === "BUY");
+  const deepestBuyOrder = buyOrders.length > 0 ? buyOrders.reduce((min, o) => o.price < min.price ? o : min, buyOrders[0]) : null;
+  const maxLadderDropPct = (deepestBuyOrder && currentPrice > 0)
+    ? Number((((currentPrice - deepestBuyOrder.price) / currentPrice) * 100).toFixed(1))
+    : null;
+  const isDeepBreached = Boolean(maxLadderDropPct && dropPct > maxLadderDropPct);
+
   const {
     targetPrice,
     consumedCash,
@@ -171,6 +178,24 @@ const StressTestSandboxCard = ({
             className="w-full h-2.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-900 transition-all"
           />
         </div>
+
+        {/* 超深筑底状态解释横幅 */}
+        {isDeepBreached && (
+          <div className="mt-3 p-3 bg-purple-50/90 border border-purple-200 rounded-xl flex items-start gap-2.5 text-xs text-purple-900 animate-fadeIn">
+            <Info className="w-4 h-4 text-purple-600 mt-0.5 shrink-0" />
+            <div className="space-y-0.5">
+              <div className="font-bold text-purple-950 flex items-center gap-2">
+                <span>🛡️ 超深水淹满仓状态</span>
+                <span className="text-[10px] bg-purple-100 text-purple-800 border border-purple-300 px-2 py-0.5 rounded-full font-mono">
+                  网格最深防御: -{maxLadderDropPct}% (¥{deepestBuyOrder?.price?.toFixed(3)})
+                </span>
+              </div>
+              <p className="text-[11px] text-purple-800 leading-relaxed">
+                当前模拟跌幅（-{dropPct}%）已超出该网格预设的最深挂单（-{maxLadderDropPct}%）。系统已在 -{maxLadderDropPct}% 处将预留的流动资金全部转化为低价筹码完成满仓筑底，因此跌幅继续下挫至 -{dropPct}% 时<strong>无新增现金消耗</strong>，账户进入锁仓待机与均值回归反弹状态。
+              </p>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 2. 四大核心安全态势仪表盘 */}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Clock, Calendar, PiggyBank, Layers, TrendingUp, Sparkles } from "lucide-react";
+import { Settings, Clock, Calendar, PiggyBank, Layers, TrendingUp, Sparkles, Anchor } from "lucide-react";
 import { usePersistedState } from "@shared/hooks";
 import { validateETFCode, validateCapital } from "@shared/utils/validation";
 import { checkDisclaimerStatus, acceptDisclaimer } from "@shared/utils/disclaimer";
@@ -55,6 +55,13 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
   const [stepMode, setStepMode] = usePersistedState(
     "stepMode",
     initialValues?.stepMode || "atr",
+  );
+  // 自定义基准价格模式：'market' 最新市场价 (默认) | 'custom' 自定义成本价
+  const [benchmarkMode, setBenchmarkMode] = useState(
+    initialValues?.benchmarkPrice ? "custom" : "market",
+  );
+  const [customPrice, setCustomPrice] = useState(
+    initialValues?.benchmarkPrice ? initialValues.benchmarkPrice.toString() : "",
   );
 
   const [popularETFs, setPopularETFs] = useState([]);
@@ -196,6 +203,7 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
       scalingRatio: enableScaling ? parseFloat(scalingRatio) : 0.0,
       reinvestMode,
       stepMode,
+      benchmarkPrice: (benchmarkMode === "custom" && customPrice) ? parseFloat(customPrice) : null,
     };
 
     // 检查用户是否需要重新确认免责声明
@@ -252,6 +260,79 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
           etfInfo={etfInfo}
           loading={etfLoading}
         />
+
+        {/* 基准价格锚点设置 (最新市价 vs 自定义持仓成本价) */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <Anchor className="w-4 h-4 text-blue-600" />
+              网格基准价格 (P₀ 锚点)
+            </label>
+            <span className="text-xs text-blue-700 font-medium">
+              {benchmarkMode === "custom" ? "✏️ 用户自定义成本锚点" : "⚡ 自动跟随最新收盘市价"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setBenchmarkMode("market");
+                setCustomPrice("");
+              }}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-left transition-all ${
+                benchmarkMode === "market"
+                  ? "bg-blue-50/90 border-blue-500 text-blue-900 ring-2 ring-blue-400/40 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs text-blue-950 flex items-center gap-1">
+                <span>⚡ 最新收盘市价 (默认)</span>
+              </div>
+              <div className="text-[10px] text-gray-500 mt-0.5">
+                {etfInfo?.current_price ? `当前现价约 ¥${etfInfo.current_price}` : "自动获取当日最新市场价格"}
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setBenchmarkMode("custom");
+                if (!customPrice && etfInfo?.current_price) {
+                  setCustomPrice(etfInfo.current_price.toString());
+                }
+              }}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-left transition-all ${
+                benchmarkMode === "custom"
+                  ? "bg-amber-50/90 border-amber-500 text-amber-900 ring-2 ring-amber-400/40 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs text-amber-950 flex items-center gap-1">
+                <span>✏️ 自定义成本/心理价</span>
+              </div>
+              <div className="text-[10px] text-gray-500 mt-0.5">
+                按自有持仓成本或心仪点位铺设网格
+              </div>
+            </button>
+          </div>
+
+          {benchmarkMode === "custom" && (
+            <div className="mt-2.5 p-2.5 bg-amber-50/70 border border-amber-300 rounded-lg flex items-center gap-3">
+              <span className="text-xs font-medium text-amber-900 shrink-0">自定义基准价 (元):</span>
+              <input
+                type="number"
+                step="0.001"
+                min="0.01"
+                placeholder={etfInfo?.current_price ? etfInfo.current_price.toString() : "例如 1.250"}
+                value={customPrice}
+                onChange={(e) => setCustomPrice(e.target.value)}
+                className="w-36 px-2.5 py-1 text-xs font-mono font-bold bg-white border border-amber-400 rounded focus:ring-1 focus:ring-amber-500 focus:outline-none"
+              />
+              <span className="text-[11px] text-amber-800">
+                以该价格为中心向上挂卖单、向下挂买单
+              </span>
+            </div>
+          )}
+        </div>
 
         <CapitalInput
           value={totalCapital}

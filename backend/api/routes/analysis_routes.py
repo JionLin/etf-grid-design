@@ -83,10 +83,19 @@ def analyze_etf_strategy():
         step_mode = str(data.get('stepMode', data.get('step_mode', 'atr')))
         if step_mode not in ['atr', 'fixed_eda']:
             step_mode = 'atr'
+
+        # 获取自定义基准价格（可选参数，默认None）
+        raw_price = data.get('benchmarkPrice', data.get('benchmark_price'))
+        try:
+            benchmark_price = float(raw_price) if raw_price not in [None, '', 'null'] else None
+            if benchmark_price is not None and benchmark_price <= 0:
+                benchmark_price = None
+        except (ValueError, TypeError):
+            benchmark_price = None
         
         from flask import current_app
         current_app.logger.info(f"开始分析ETF策略: {etf_code}, 资金{total_capital}, "
-                   f"{grid_type}网格, {risk_preference}, 加码{scaling_ratio}, 步长模式{step_mode}, 周期{analysis_days}天")
+                   f"{grid_type}网格, {risk_preference}, 加码{scaling_ratio}, 步长模式{step_mode}, 基准价{benchmark_price}, 周期{analysis_days}天")
         
         # 执行分析
         analysis_result = etf_service.analyze_etf_strategy(
@@ -98,6 +107,7 @@ def analyze_etf_strategy():
             analysis_days=analysis_days,
             scaling_ratio=scaling_ratio,
             step_mode=step_mode,
+            benchmark_price=benchmark_price,
         )
         
         current_app.logger.info(f"ETF策略分析完成: {etf_code}, "

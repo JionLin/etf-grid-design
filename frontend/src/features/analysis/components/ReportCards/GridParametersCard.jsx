@@ -64,6 +64,32 @@ const GridParametersCard = ({
   // 复制反馈状态
   const [copiedKey, setCopiedKey] = useState(null);
 
+  const ladderItems = gridStrategy?.composite_grid?.merged_ladder || [];
+  const sellOrders = ladderItems.filter((item) => item.action === "SELL");
+  const buyOrders = ladderItems.filter((item) => item.action === "BUY");
+  const maxSellPrice = sellOrders.length > 0 ? Math.max(...sellOrders.map((o) => o.price)) : null;
+  const minBuyPrice = buyOrders.length > 0 ? Math.min(...buyOrders.map((o) => o.price)) : null;
+
+  const benchmarkPrice = gridStrategy?.benchmark_price ?? inputParameters?.benchmarkPrice ?? inputParameters?.benchmark_price ?? current_price;
+  const isCustomBenchmark = Boolean(gridStrategy?.is_custom_benchmark || (benchmarkPrice && Math.abs(benchmarkPrice - current_price) > 0.0001));
+
+  let sentinelTitle = "🟢 网格正常巡航中";
+  let sentinelDesc = "当前标的现价处于挂单安全区间内，买卖单保持活跃待命，随时捕捉差价。";
+  let sentinelBg = "bg-emerald-50/90 border-emerald-300 text-emerald-900";
+  let sentinelBadge = "bg-emerald-100 text-emerald-800 border-emerald-300";
+
+  if (maxSellPrice && current_price > maxSellPrice) {
+    sentinelTitle = "🌤️ 向上突破超轨 · 获利清仓休眠";
+    sentinelDesc = `当前市场现价 (¥${current_price}) 已高于最高卖单 (¥${maxSellPrice})。网格波段筹码已全部止盈出局，保持克制严禁追高，耐心等待均值回归。`;
+    sentinelBg = "bg-sky-50/90 border-sky-300 text-sky-900";
+    sentinelBadge = "bg-sky-100 text-sky-800 border-sky-300";
+  } else if (minBuyPrice && current_price < minBuyPrice) {
+    sentinelTitle = "🛡️ 深度击穿筑底 · 满仓锁仓待机";
+    sentinelDesc = `当前市场现价 (¥${current_price}) 已跌穿最低买单 (¥${minBuyPrice})。全套网格已在底部完成满仓吸筹，严守纪律停止无序补仓，安心锁仓等待反弹。`;
+    sentinelBg = "bg-purple-50/90 border-purple-300 text-purple-900";
+    sentinelBadge = "bg-purple-100 text-purple-800 border-purple-300";
+  }
+
   const handleCopyOrder = (key, text) => {
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
@@ -75,7 +101,7 @@ const GridParametersCard = ({
     const symbolCode = inputParameters?.etfCode || "ETF";
     const lines = [
       `=== ${symbolCode} 复合网格挂单清单 ===`,
-      `基准价格: ¥${current_price?.toFixed(3)} | 底仓: ${baseInfo?.shares?.toLocaleString() || 0} 股 (约 ¥${baseInfo?.actual_capital?.toLocaleString() || 0})`,
+      `基准价格: ¥${Number(benchmarkPrice || current_price).toFixed(3)}${isCustomBenchmark ? " (自定义锚点)" : ""} | 底仓: ${baseInfo?.shares?.toLocaleString() || 0} 股 (约 ¥${baseInfo?.actual_capital?.toLocaleString() || 0})`,
       `----------------------------------------------------`,
     ];
     orders.forEach((o) => {
@@ -205,12 +231,14 @@ const GridParametersCard = ({
           </div>
 
           <div className="text-center p-4 bg-gray-50 rounded-lg">
-            <div className="text-2xl font-bold text-gray-900 mb-1">
-              ¥{current_price.toFixed(3)}
+            <div className="text-2xl font-bold text-gray-900 mb-1 font-mono">
+              ¥{Number(benchmarkPrice || current_price).toFixed(3)}
             </div>
-            <div className="text-sm text-gray-700 font-medium">基准价格</div>
+            <div className="text-sm text-gray-700 font-medium">
+              {isCustomBenchmark ? "基准锚点 (自定义)" : "基准价格"}
+            </div>
             <div className="text-xs text-gray-600 mt-1">
-              {getPriceDateText()}
+              {isCustomBenchmark ? `当前市场现价: ¥${current_price.toFixed(3)}` : getPriceDateText()}
             </div>
           </div>
 
@@ -230,7 +258,7 @@ const GridParametersCard = ({
             <div
               className="absolute top-0 bottom-0 w-0.5 shadow-lg"
               style={{
-                left: `${((current_price - price_range.lower) / (price_range.upper - price_range.lower)) * 100}%`,
+                left: `${((Number(benchmarkPrice || current_price) - price_range.lower) / (price_range.upper - price_range.lower)) * 100}%`,
               }}
             >
               <div className="absolute -top-1 left-1/2 transform -translate-x-1/2 w-2 h-2 bg-white rounded-full shadow-md"></div>
@@ -367,6 +395,24 @@ const GridParametersCard = ({
               按网格间距和单笔数量计算
             </div>
           </div>
+        </div>
+
+        {/* 网格运行状态哨兵横幅 */}
+        <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${sentinelBg} shadow-xs my-6`}>
+          <div className="flex items-center gap-3">
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${sentinelBadge} shrink-0`}>
+              {sentinelTitle}
+            </span>
+            <span className="text-xs font-medium">
+              {sentinelDesc}
+            </span>
+          </div>
+          {isCustomBenchmark && (
+            <div className="shrink-0 flex items-center gap-1.5 text-xs font-mono font-semibold bg-white/80 px-2.5 py-1 rounded-lg border border-amber-300 text-amber-900">
+              <span>⚓ 中心锚点: ¥{Number(benchmarkPrice).toFixed(3)}</span>
+              <span className="text-[10px] text-gray-500 font-sans">(现价: ¥{current_price})</span>
+            </div>
+          )}
         </div>
 
         {/* 网格价格水平与做T挂单阶梯 */}
@@ -736,18 +782,18 @@ const GridParametersCard = ({
                             <tr key="current_anchor" className="bg-blue-50/90 border-y-2 border-blue-300 font-sans">
                               <td className="py-2.5 px-3 font-bold text-blue-900 flex items-center gap-1.5">
                                 <span className="inline-block w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
-                                【现价基准】
+                                {isCustomBenchmark ? "【基准锚点】" : "【现价基准】"}
                               </td>
                               <td className="py-2.5 px-3 text-base font-bold text-blue-900 font-mono">
-                                ¥{current_price.toFixed(3)}
+                                ¥{Number(benchmarkPrice || current_price).toFixed(3)}
                               </td>
                               <td className="py-2.5 px-3">
                                 <span className="text-[10px] font-bold text-blue-800 bg-blue-200/80 px-1.5 py-0.5 rounded">
-                                  基准轴心
+                                  {isCustomBenchmark ? "自定义锚点" : "基准轴心"}
                                 </span>
                               </td>
-                              <td className="py-2.5 px-3 font-medium text-blue-800">
-                                现价持仓水温
+                              <td className="py-2.5 px-3 font-medium text-blue-800 text-xs">
+                                {isCustomBenchmark ? `现价 ¥${current_price.toFixed(3)}` : "现价持仓水温"}
                               </td>
                               <td className="py-2.5 px-3 font-bold text-blue-900 font-mono">
                                 底仓 {(baseInfo.shares || 0).toLocaleString()} 股
@@ -998,7 +1044,7 @@ const GridParametersCard = ({
           <StressTestSandboxCard
             compositeGrid={gridStrategy.composite_grid}
             totalCapital={effectiveTotalCapital}
-            currentPrice={current_price}
+            currentPrice={Number(benchmarkPrice || current_price)}
           />
         )}
       </div>

@@ -268,11 +268,38 @@ const AnalysisPage = () => {
                   {analysisData?.etf_info?.name || `ETF`}({etfCode})
                   网格策略分析
                 </h1>
-                <p className="text-sm text-gray-600">
-                  投资金额：{currentParams?.totalCapital?.toLocaleString()}元 |
-                  网格类型：{currentParams?.gridType} | 频率偏好：
-                  {currentParams?.riskPreference} | 调节系数：{currentParams?.adjustmentCoefficient}
-                </p>
+                <div className="text-sm text-gray-600 flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                  <span>投资金额：{currentParams?.totalCapital?.toLocaleString()}元</span>
+                  <span>|</span>
+                  <span>网格类型：{currentParams?.gridType}</span>
+                  <span>|</span>
+                  <span>
+                    步长模式：
+                    {currentParams?.stepMode === "fixed_eda" ? (
+                      <span className="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 font-mono text-xs">
+                        🏛️ E大原版(5%/15%/30%)
+                      </span>
+                    ) : (
+                      <span className="text-indigo-700 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 font-mono text-xs">
+                        ★ 🌊 ATR自适应
+                      </span>
+                    )}
+                  </span>
+                  <span>|</span>
+                  <span>周期：{currentParams?.analysisDays || 180}天</span>
+                  {currentParams?.benchmarkPrice && (
+                    <>
+                      <span>|</span>
+                      <span>
+                        基准价：
+                        <span className="text-blue-700 font-semibold font-mono">
+                          ¥{currentParams.benchmarkPrice}
+                        </span>
+                        <span className="text-[10px] text-gray-500 ml-0.5">(自定义)</span>
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 

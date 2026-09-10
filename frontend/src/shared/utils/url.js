@@ -36,6 +36,10 @@ export const DEFAULT_PARAMS = {
   grid: "geometric", // 对应"等比"
   risk: "balanced", // 对应"均衡"
   adjustment: "1.0", // 调节系数默认值
+  stepMode: "atr", // 步长生成模式：'atr' | 'fixed_eda'
+  days: "180", // 历史分析周期：90 | 180 | 365
+  scaling: "0.0", // 逐格加码比例：0.0 ~ 0.20
+  reinvest: "pool_shares", // 做T收益留存模式：'pool_shares' | 'cash'
 };
 
 /**
@@ -69,6 +73,34 @@ export const encodeAnalysisParams = (params) => {
   // 调节系数参数
   if (params.adjustmentCoefficient !== undefined && params.adjustmentCoefficient !== null) {
     searchParams.set("adjustment", params.adjustmentCoefficient.toString());
+  }
+
+  // 步长生成模式 (ATR动态自适应 vs E大原版5%/15%/30%)
+  if (params.stepMode) {
+    searchParams.set("stepMode", params.stepMode);
+  }
+
+  // 历史分析周期
+  if (params.analysisDays !== undefined && params.analysisDays !== null) {
+    searchParams.set("days", params.analysisDays.toString());
+  }
+
+  // 逐格加码比例
+  if (params.scalingRatio !== undefined && params.scalingRatio !== null) {
+    searchParams.set("scaling", params.scalingRatio.toString());
+  }
+
+  // 做T收益留存机制
+  if (params.reinvestMode) {
+    searchParams.set("reinvest", params.reinvestMode);
+  }
+
+  // 自定义基准价格参数
+  if (params.benchmarkPrice !== undefined && params.benchmarkPrice !== null && params.benchmarkPrice !== "") {
+    const p = parseFloat(params.benchmarkPrice);
+    if (!isNaN(p) && p > 0) {
+      searchParams.set("price", p.toString());
+    }
   }
 
   return searchParams;
@@ -109,6 +141,45 @@ export const decodeAnalysisParams = (searchParams) => {
     const adjustmentNum = parseFloat(adjustment);
     if (!isNaN(adjustmentNum) && adjustmentNum >= 0.0 && adjustmentNum <= 2.0) {
       params.adjustmentCoefficient = adjustmentNum;
+    }
+  }
+
+  // 解析步长生成模式
+  const stepMode = searchParams.get("stepMode") || searchParams.get("step_mode");
+  if (stepMode && ["atr", "fixed_eda"].includes(stepMode)) {
+    params.stepMode = stepMode;
+  }
+
+  // 解析历史分析周期
+  const days = searchParams.get("days") || searchParams.get("analysisDays");
+  if (days) {
+    const daysNum = parseInt(days, 10);
+    if (!isNaN(daysNum) && daysNum > 0) {
+      params.analysisDays = daysNum;
+    }
+  }
+
+  // 解析逐格加码比例
+  const scaling = searchParams.get("scaling") || searchParams.get("scalingRatio");
+  if (scaling !== null && scaling !== undefined) {
+    const scalingNum = parseFloat(scaling);
+    if (!isNaN(scalingNum) && scalingNum >= 0.0 && scalingNum <= 0.5) {
+      params.scalingRatio = scalingNum;
+    }
+  }
+
+  // 解析做T收益留存模式
+  const reinvest = searchParams.get("reinvest") || searchParams.get("reinvestMode");
+  if (reinvest && ["pool_shares", "cash"].includes(reinvest)) {
+    params.reinvestMode = reinvest;
+  }
+
+  // 解析自定义基准价格参数
+  const price = searchParams.get("price") || searchParams.get("benchmarkPrice");
+  if (price !== null && price !== undefined && price !== "") {
+    const priceNum = parseFloat(price);
+    if (!isNaN(priceNum) && priceNum > 0) {
+      params.benchmarkPrice = priceNum;
     }
   }
 
@@ -166,6 +237,44 @@ export const validateAndCompleteParams = (params) => {
     if (isNaN(adjustment) || adjustment < 0.0 || adjustment > 2.0) {
       result.errors.push("调节系数应在0.0-2.0之间");
       result.params.adjustmentCoefficient = parseFloat(DEFAULT_PARAMS.adjustment);
+    }
+  }
+
+  // 验证并补全步长模式
+  if (!params.stepMode || !["atr", "fixed_eda"].includes(params.stepMode)) {
+    result.params.stepMode = DEFAULT_PARAMS.stepMode;
+  } else {
+    result.params.stepMode = params.stepMode;
+  }
+
+  // 验证并补全历史分析周期
+  const days = parseInt(params.analysisDays, 10);
+  if (isNaN(days) || days <= 0) {
+    result.params.analysisDays = parseInt(DEFAULT_PARAMS.days, 10);
+  } else {
+    result.params.analysisDays = days;
+  }
+
+  // 验证并补全逐格加码比例
+  const scaling = parseFloat(params.scalingRatio);
+  if (isNaN(scaling) || scaling < 0.0 || scaling > 0.5) {
+    result.params.scalingRatio = parseFloat(DEFAULT_PARAMS.scaling);
+  } else {
+    result.params.scalingRatio = scaling;
+  }
+
+  // 验证并补全做T收益留存模式
+  if (!params.reinvestMode || !["pool_shares", "cash"].includes(params.reinvestMode)) {
+    result.params.reinvestMode = DEFAULT_PARAMS.reinvest;
+  } else {
+    result.params.reinvestMode = params.reinvestMode;
+  }
+
+  // 验证并补全自定义基准价格 (可选)
+  if (params.benchmarkPrice !== undefined && params.benchmarkPrice !== null && params.benchmarkPrice !== "") {
+    const p = parseFloat(params.benchmarkPrice);
+    if (!isNaN(p) && p > 0) {
+      result.params.benchmarkPrice = p;
     }
   }
 
