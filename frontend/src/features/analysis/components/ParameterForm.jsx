@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Clock, Calendar } from "lucide-react";
+import { Settings, Clock, Calendar, PiggyBank, Layers, TrendingUp, Sparkles } from "lucide-react";
 import { usePersistedState } from "@shared/hooks";
 import { validateETFCode, validateCapital } from "@shared/utils/validation";
 import { checkDisclaimerStatus, acceptDisclaimer } from "@shared/utils/disclaimer";
@@ -40,6 +40,17 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
     "analysisDays",
     initialValues?.analysisDays || 180,
   );
+  // 做T收益模式：'pool_shares' 利润池滚存留股 (推荐) | 'cash' 全额留现金
+  const [reinvestMode, setReinvestMode] = usePersistedState(
+    "reinvestMode",
+    initialValues?.reinvestMode || "pool_shares",
+  );
+  // 逐格加码比例：0.0 (等额) | 0.05~0.20 (倒金字塔递增)
+  const [scalingRatio, setScalingRatio] = usePersistedState(
+    "scalingRatio",
+    initialValues?.scalingRatio !== undefined ? Number(initialValues.scalingRatio) : 0.0,
+  );
+  const [enableScaling, setEnableScaling] = useState(Number(scalingRatio) > 0);
 
   const [popularETFs, setPopularETFs] = useState([]);
   const [capitalPresets, setCapitalPresets] = useState([]);
@@ -177,6 +188,8 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
       riskPreference,
       adjustmentCoefficient: parseFloat(adjustmentCoefficient),
       analysisDays: parseInt(analysisDays, 10) || 180,
+      scalingRatio: enableScaling ? parseFloat(scalingRatio) : 0.0,
+      reinvestMode,
     };
 
     // 检查用户是否需要重新确认免责声明
@@ -290,6 +303,141 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
               <div className="text-[10px] opacity-75 mt-0.5">年度大箱体 · 防守</div>
             </button>
           </div>
+        </div>
+
+        {/* 做 T 收益处理机制 (E大 2.1 留利润) */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <PiggyBank className="w-4 h-4 text-emerald-600" />
+              做 T 收益留存机制 (E大 2.1)
+            </label>
+            <span className="text-xs text-emerald-700 font-medium">
+              {reinvestMode === "pool_shares" ? "★ 聚沙成塔 · 滚存0成本份额" : "落袋为安 · 全现金"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setReinvestMode("pool_shares")}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-left transition-all ${
+                reinvestMode === "pool_shares"
+                  ? "bg-emerald-50/90 border-emerald-500 text-emerald-800 ring-2 ring-emerald-400/40 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="flex items-center gap-1.5 font-semibold text-xs text-emerald-900">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                智能利润滚存 (推荐)
+              </div>
+              <div className="text-[10px] text-gray-500 mt-0.5">每攒满100股自动沉淀为0成本锁仓份额</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setReinvestMode("cash")}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-left transition-all ${
+                reinvestMode === "cash"
+                  ? "bg-blue-50/90 border-blue-500 text-blue-800 ring-2 ring-blue-400/40 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs text-gray-900">💰 全额落袋现金</div>
+              <div className="text-[10px] text-gray-500 mt-0.5">经典1.0模式，差价利润全额收回为可用现金</div>
+            </button>
+          </div>
+        </div>
+
+        {/* 逢跌买入节奏 (E大 2.2 逐格加码) */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <Layers className="w-4 h-4 text-blue-600" />
+              逢跌买入节奏 (E大 2.2 逐格加码)
+            </label>
+            <span className="text-xs text-gray-500 font-mono">
+              {enableScaling ? `倒金字塔递增 +${Math.round(scalingRatio * 100)}%` : "各档等额买入 (0%)"}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <button
+              type="button"
+              onClick={() => {
+                setEnableScaling(false);
+                setScalingRatio(0.0);
+              }}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-center transition-all ${
+                !enableScaling
+                  ? "bg-blue-50/90 border-blue-500 text-blue-700 ring-2 ring-blue-400/40 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs">⚖️ 各档等额 (默认 0%)</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">平分流动资金，风险均匀分布</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setEnableScaling(true);
+                if (Number(scalingRatio) === 0) setScalingRatio(0.10);
+              }}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-center transition-all ${
+                enableScaling
+                  ? "bg-purple-50/90 border-purple-500 text-purple-800 ring-2 ring-purple-400/40 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs">📐 逐格加码 (倒金字塔)</div>
+              <div className="text-[10px] text-gray-400 mt-0.5">越跌买越多，极速摊薄持仓成本</div>
+            </button>
+          </div>
+
+          {enableScaling && (
+            <div className="p-3 bg-purple-50/50 rounded-xl border border-purple-200 space-y-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-purple-900 font-medium">每格递增资金比例：</span>
+                <span className="font-mono font-bold text-purple-700">+{Math.round(scalingRatio * 100)}%</span>
+              </div>
+              <input
+                type="range"
+                min="0.05"
+                max="0.20"
+                step="0.01"
+                value={scalingRatio}
+                onChange={(e) => setScalingRatio(parseFloat(e.target.value))}
+                className="w-full h-2 bg-purple-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+              />
+              <div className="flex items-center justify-between gap-1.5 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setScalingRatio(0.05)}
+                  className={`px-2 py-0.5 rounded border transition-all ${
+                    scalingRatio === 0.05 ? "bg-purple-600 text-white font-bold" : "bg-white text-purple-700 border-purple-200"
+                  }`}
+                >
+                  5% (温和)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalingRatio(0.10)}
+                  className={`px-2 py-0.5 rounded border transition-all ${
+                    scalingRatio === 0.10 ? "bg-purple-600 text-white font-bold" : "bg-white text-purple-700 border-purple-200"
+                  }`}
+                >
+                  ★ 10% (E大推荐)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalingRatio(0.20)}
+                  className={`px-2 py-0.5 rounded border transition-all ${
+                    scalingRatio === 0.20 ? "bg-purple-600 text-white font-bold" : "bg-white text-purple-700 border-purple-200"
+                  }`}
+                >
+                  20% (激进大底)
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 提交按钮 */}

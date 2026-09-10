@@ -73,10 +73,15 @@ def analyze_etf_strategy():
         analysis_days = int(data.get('analysisDays', 180))
         if analysis_days not in [90, 180, 365]:
             analysis_days = 180
+
+        # 获取逐格加码比例（可选参数，默认0.0，范围0.0-0.20）
+        scaling_ratio = float(data.get('scalingRatio', data.get('scaling_ratio', 0.0)))
+        if scaling_ratio < 0.0 or scaling_ratio > 0.50:
+            scaling_ratio = 0.0
         
         from flask import current_app
         current_app.logger.info(f"开始分析ETF策略: {etf_code}, 资金{total_capital}, "
-                   f"{grid_type}网格, {risk_preference}, 周期{analysis_days}天")
+                   f"{grid_type}网格, {risk_preference}, 加码{scaling_ratio}, 周期{analysis_days}天")
         
         # 执行分析
         analysis_result = etf_service.analyze_etf_strategy(
@@ -85,7 +90,8 @@ def analyze_etf_strategy():
             grid_type=grid_type,
             risk_preference=risk_preference,
             adjustment_coefficient=adjustment_coefficient,
-            analysis_days=analysis_days
+            analysis_days=analysis_days,
+            scaling_ratio=scaling_ratio,
         )
         
         current_app.logger.info(f"ETF策略分析完成: {etf_code}, "
@@ -121,15 +127,19 @@ def run_backtest():
         if not etf_code:
             return jsonify({'success': False, 'error': 'ETF代码不能为空'}), 400
 
-        total_capital = float(data.get('totalCapital', 100000))
-        backtest_days = int(data.get('backtestDays', 180))
+        total_capital = float(data.get('totalCapital', data.get('total_capital', 100000)))
+        backtest_days = int(data.get('backtestDays', data.get('backtest_days', 180)))
         adjustment_coefficient = float(data.get('adjustmentCoefficient', 1.0))
+        scaling_ratio = float(data.get('scalingRatio', data.get('scaling_ratio', 0.0)))
+        reinvest_mode = str(data.get('reinvestMode', data.get('reinvest_mode', 'cash')))
 
         result = etf_service.run_strategy_backtest(
             etf_code=etf_code,
             total_capital=total_capital,
             backtest_days=backtest_days,
             adjustment_coefficient=adjustment_coefficient,
+            scaling_ratio=scaling_ratio,
+            reinvest_mode=reinvest_mode,
         )
 
         return jsonify({'success': True, 'data': result})

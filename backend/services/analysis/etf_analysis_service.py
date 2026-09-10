@@ -4,7 +4,7 @@ ETF分析服务 - 业务流程协调
 """
 
 import pandas as pd
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple, Any
 import logging
 from datetime import datetime, timedelta
 
@@ -176,7 +176,8 @@ class ETFAnalysisService:
     def analyze_etf_strategy(self, etf_code: str, total_capital: float,
                            grid_type: str, risk_preference: str,
                            adjustment_coefficient: float = 1.0,
-                           analysis_days: int = 180) -> Dict:
+                           analysis_days: int = 180,
+                           scaling_ratio: float = 0.0) -> Dict:
         """
         完整的ETF网格交易策略分析
         
@@ -220,7 +221,8 @@ class ETFAnalysisService:
                 total_capital=total_capital,
                 grid_type=grid_type,
                 risk_preference=risk_preference,
-                adjustment_coefficient=adjustment_coefficient
+                adjustment_coefficient=adjustment_coefficient,
+                scaling_ratio=scaling_ratio,
             )
             
             # 5. 生成策略分析依据
@@ -244,10 +246,17 @@ class ETFAnalysisService:
                 'analysis_timestamp': datetime.now().isoformat(),
                 'input_parameters': {
                     'etf_code': etf_code,
+                    'etfCode': etf_code,
                     'total_capital': total_capital,
+                    'totalCapital': total_capital,
                     'grid_type': grid_type,
+                    'gridType': grid_type,
                     'risk_preference': risk_preference,
-                    'adjustment_coefficient': adjustment_coefficient
+                    'riskPreference': risk_preference,
+                    'adjustment_coefficient': adjustment_coefficient,
+                    'adjustmentCoefficient': adjustment_coefficient,
+                    'analysis_days': analysis_days,
+                    'analysisDays': analysis_days,
                 }
             }
             
@@ -386,7 +395,8 @@ class ETFAnalysisService:
     def _calculate_grid_parameters(self, latest_price_info: Dict,
                                  atr_analysis: Dict, market_indicators: Dict,
                                  total_capital: float, grid_type: str,
-                                 risk_preference: str, adjustment_coefficient: float = 1.0) -> Dict:
+                                 risk_preference: str, adjustment_coefficient: float = 1.0,
+                                 scaling_ratio: float = 0.0) -> Dict:
         """
         计算网格策略参数（使用算法模块）
         
@@ -452,7 +462,8 @@ class ETFAnalysisService:
                 current_price, atr_ratio, adjustment_coefficient
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
-                total_capital, current_price, composite_steps, base_position_ratio=0.5
+                total_capital, current_price, composite_steps, base_position_ratio=0.5,
+                scaling_ratio=scaling_ratio
             )
             
             result = {
@@ -501,7 +512,9 @@ class ETFAnalysisService:
         total_capital: float,
         backtest_days: int = 180,
         adjustment_coefficient: float = 1.0,
-    ) -> Dict:
+        scaling_ratio: float = 0.0,
+        reinvest_mode: str = 'cash',
+    ) -> Dict[str, Any]:
         """
         运行策略历史回测
 
@@ -510,9 +523,11 @@ class ETFAnalysisService:
             total_capital: 资金量
             backtest_days: 回测天数 (默认 180 天)
             adjustment_coefficient: 调节系数
+            scaling_ratio: 逐格加码比例 (默认 0.0)
+            reinvest_mode: 做T收益模式 ('cash' 全额留现金, 'pool_shares' 利润池滚存留股)
 
         Returns:
-            Dict: 回测结果
+            回测报告
         """
         try:
             df = self.get_historical_data(etf_code, days=backtest_days)
@@ -529,13 +544,15 @@ class ETFAnalysisService:
                 current_price, atr_ratio, adjustment_coefficient
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
-                total_capital, current_price, composite_steps, base_position_ratio=0.5
+                total_capital, current_price, composite_steps, base_position_ratio=0.5,
+                scaling_ratio=scaling_ratio
             )
 
             return self.backtest_engine.run_backtest(
                 daily_df=df,
                 total_capital=total_capital,
                 composite_grid=composite_grid,
+                reinvest_mode=reinvest_mode,
             )
         except Exception as e:
             logger.error(f"策略历史回测执行失败: {str(e)}")

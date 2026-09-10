@@ -25,16 +25,27 @@ import {
   LayoutGrid
 } from "lucide-react";
 import { formatCurrency, formatPercent, formatDate, formatTimestamp } from "@shared/utils";
+import StressTestSandboxCard from "./StressTestSandboxCard";
 
 const GridParametersCard = ({
   gridStrategy,
   inputParameters,
+  totalCapital,
   strategyRationale,
   adjustmentSuggestions,
   showDetailed = false,
   dataQuality,
 }) => {
   if (!gridStrategy) return null;
+
+  const effectiveTotalCapital = Number(
+    totalCapital ??
+    inputParameters?.total_capital ??
+    inputParameters?.totalCapital ??
+    gridStrategy?.composite_grid?.total_capital ??
+    gridStrategy?.fund_allocation?.total_capital ??
+    30000
+  );
 
   const {
     current_price,
@@ -789,7 +800,12 @@ const GridParametersCard = ({
                                   ¥{o.amount.toLocaleString(undefined, { maximumFractionDigits: 1 })}
                                 </td>
                                 <td className="py-2 px-3 text-emerald-600 font-semibold font-sans">
-                                  +¥{o.est_profit.toFixed(1)}
+                                  <div>+¥{o.est_profit.toFixed(1)}</div>
+                                  {inputParameters?.reinvestMode === "pool_shares" && (
+                                    <div className="text-[9px] text-emerald-700 font-normal">
+                                      → 汇入留股池
+                                    </div>
+                                  )}
                                 </td>
                                 <td className="py-2 px-3">
                                   <div className="flex items-center gap-1.5">
@@ -965,6 +981,15 @@ const GridParametersCard = ({
               </div>
             )}
           </>
+        )}
+
+        {/* 方案 A：极限行情压力测试沙盘（原位挂载于挂单阶梯表下方） */}
+        {gridStrategy.composite_grid && (
+          <StressTestSandboxCard
+            compositeGrid={gridStrategy.composite_grid}
+            totalCapital={effectiveTotalCapital}
+            currentPrice={current_price}
+          />
         )}
       </div>
 

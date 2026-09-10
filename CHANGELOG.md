@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-10
+### :sparkles: Major Features (E大网格 2.0 体系代际重构)
+- **复合网格**: 引入 E大 2.3 大中小三层多轨复合网格体系（20% 小网高频做T / 35% 中网波段巡航 / 45% 大网极值防守），支持 14 日 ATR 动态自适应步长折算与 A 股 100 股向下对齐。
+- **留股模式**: 推出 E大 2.1 模式 B 智能利润池滚存留股机制，建立 0 成本利润蓄水池，每满 100 股自动转增免费锁仓份额，彻底攻克牛市卖飞踏空痛点。
+- **逐格加码**: 推出 E大 2.2 倒金字塔递增加码算法（支持 5%~20% 调节），采用指数加权归一化分配，深水区重兵合围，极速摊薄持仓成本。
+- **真实回测**: 构建严谨的 A 股 T+1 账户隔夜持仓解冻与日内高低点撮合模型，支持 90/180/365 天周期切换、Alpha 超额收益、原生 SVG 走势对决与三轨彩虹利润归因。
+- **极限沙盘**: 研发极限行情暴跌压力测试沙盘（方案 A 阶梯下原位挂载），支持 0%~-60% 自由滑块与 5 大经典情景，毫秒级推演资金耗尽点与脱困反弹阈值。
+- **数据源增强**: 引入腾讯财经免密免 Token 日线行情降级引擎，扩充 91 只核心宽基与高景气行业 ETF 资产矩阵。
+- **全链路一致**: 归一化修复前后端资金量传递，确保 3w、5w、10w 等任意资金规模在挂单、沙盘与回测中严格对齐。
+- **文档体系**: 新增量化白皮书 `docs/STRATEGY_MANUAL.md`，重构 `README.md` 项目主门面。
+
 ## [0.2.5] - 2025-09-28
 ### :sparkles: New Features
 - [`2ee17d5`](https://github.com/jorben/etf-grid-design/commit/2ee17d50171a2e8de2d8e6ac66524573d815e419) - **analysis**: add disclaimer modal for first-time users *(commit by [@jorben](https://github.com/jorben))*

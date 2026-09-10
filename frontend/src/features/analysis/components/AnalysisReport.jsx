@@ -128,6 +128,34 @@ const AnalysisReport = ({
     );
   }
 
+  // 集中归一化解析用户投资总资金与标的代码（消除蛇形/驼峰差异，严防回退 100000）
+  const userTotalCapital = Number(
+    input_parameters?.total_capital ??
+    input_parameters?.totalCapital ??
+    grid_strategy?.composite_grid?.total_capital ??
+    grid_strategy?.fund_allocation?.total_capital ??
+    30000
+  );
+
+  const targetEtfCode = input_parameters?.etf_code || input_parameters?.etfCode || etf_info?.code;
+  const targetDays = Number(input_parameters?.analysis_days || input_parameters?.analysisDays || 180);
+  const targetReinvestMode = input_parameters?.reinvest_mode || input_parameters?.reinvestMode || "pool_shares";
+  const targetScalingRatio = Number(input_parameters?.scaling_ratio ?? input_parameters?.scalingRatio ?? 0.0);
+
+  const normalizedInputParams = {
+    ...input_parameters,
+    total_capital: userTotalCapital,
+    totalCapital: userTotalCapital,
+    etf_code: targetEtfCode,
+    etfCode: targetEtfCode,
+    analysis_days: targetDays,
+    analysisDays: targetDays,
+    reinvest_mode: targetReinvestMode,
+    reinvestMode: targetReinvestMode,
+    scaling_ratio: targetScalingRatio,
+    scalingRatio: targetScalingRatio,
+  };
+
   return (
     <div className="space-y-6">
       {/* 标签页导航 */}
@@ -143,12 +171,14 @@ const AnalysisReport = ({
                 suitabilityEvaluation={suitability_evaluation}
                 gridStrategy={grid_strategy}
                 dataQuality={data_quality}
-                inputParameters={input_parameters}
+                inputParameters={normalizedInputParams}
               />
               <BacktestCard
-                etfCode={input_parameters?.etfCode || etf_info?.code}
-                totalCapital={input_parameters?.totalCapital || 100000}
-                initialDays={input_parameters?.analysisDays || 180}
+                etfCode={targetEtfCode}
+                totalCapital={userTotalCapital}
+                initialDays={targetDays}
+                reinvestMode={targetReinvestMode}
+                scalingRatio={targetScalingRatio}
               />
             </div>
           )}
@@ -158,16 +188,19 @@ const AnalysisReport = ({
             <div className="space-y-6">
               <GridParametersCard
                 gridStrategy={grid_strategy}
-                inputParameters={input_parameters}
+                inputParameters={normalizedInputParams}
+                totalCapital={userTotalCapital}
                 strategyRationale={strategy_rationale}
                 adjustmentSuggestions={adjustment_suggestions}
                 showDetailed={true}
                 dataQuality={data_quality}
               />
               <BacktestCard
-                etfCode={input_parameters?.etfCode || etf_info?.code}
-                totalCapital={input_parameters?.totalCapital || 100000}
-                initialDays={input_parameters?.analysisDays || 180}
+                etfCode={targetEtfCode}
+                totalCapital={userTotalCapital}
+                initialDays={targetDays}
+                reinvestMode={targetReinvestMode}
+                scalingRatio={targetScalingRatio}
               />
             </div>
           )}
@@ -175,9 +208,11 @@ const AnalysisReport = ({
           {/* 历史回测标签页 */}
           {activeTab === "backtest" && (
             <BacktestCard
-              etfCode={input_parameters?.etfCode || etf_info?.code}
-              totalCapital={input_parameters?.totalCapital || 100000}
-              initialDays={input_parameters?.analysisDays || 180}
+              etfCode={targetEtfCode}
+              totalCapital={userTotalCapital}
+              initialDays={targetDays}
+              reinvestMode={targetReinvestMode}
+              scalingRatio={targetScalingRatio}
             />
           )}
 
