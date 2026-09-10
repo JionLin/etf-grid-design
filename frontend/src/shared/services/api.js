@@ -78,6 +78,13 @@ class ApiService {
   }
 
   /**
+   * 获取 E大网格实战三篇经典文献
+   */
+  async getEdaLiterature() {
+    return this.get("/literature/eda-grid");
+  }
+
+  /**
    * 获取ETF基础信息
    */
   async getETFInfo(etfCode) {
@@ -130,6 +137,7 @@ const apiService = new ApiService();
 // 导出常用方法
 export const analyzeETF = (parameters) => apiService.analyzeETF(parameters);
 export const runBacktest = (parameters) => apiService.runBacktest(parameters);
+export const getEdaLiterature = () => apiService.getEdaLiterature();
 export const getETFInfo = (etfCode) => apiService.getETFInfo(etfCode);
 export const getPopularETFs = () => apiService.getPopularETFs();
 export const validateETFCode = (etfCode) => apiService.validateETFCode(etfCode);

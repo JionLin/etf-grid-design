@@ -150,3 +150,58 @@ def run_backtest():
         current_app.logger.error(f"策略回测失败: {str(e)}")
         current_app.logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': f"回测计算异常: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/literature/eda-grid', methods=['GET'])
+def get_eda_literature():
+    """获取 E大网格实战三篇经典文献"""
+    try:
+        import os
+        possible_paths = [
+            os.path.join(os.path.dirname(__file__), '..', '..', '..', 'E大', '网格3篇.md'),
+            os.path.join(os.getcwd(), 'E大', '网格3篇.md'),
+            '/Users/johnny/Desktop/github/etf-grid-design/E大/网格3篇.md',
+        ]
+        file_path = None
+        for p in possible_paths:
+            if os.path.exists(p):
+                file_path = p
+                break
+
+        if not file_path:
+            return jsonify({'success': False, 'error': '未找到文献文件'}), 404
+
+        with open(file_path, 'r', encoding='utf-8') as f:
+            full_text = f.read()
+
+        # 分割三篇
+        parts = full_text.split('# 网格')
+        articles = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            lines = part.split('\n')
+            title = lines[0].strip()
+            content = '\n'.join(lines[1:]).strip()
+            articles.append({
+                'id': len(articles) + 1,
+                'title': f'网格{title}',
+                'content': content,
+            })
+
+        return jsonify({
+            'success': True,
+            'data': {
+                'title': 'E大（ETF拯救世界）网格策略全集',
+                'author': 'ETF拯救世界',
+                'description': '历经十余年实证检验的经典波段与情绪收割系统：1.0基础与压力测试、2.0留利润/逐格加码/一网打尽',
+                'articles': articles,
+                'total_articles': len(articles),
+            }
+        })
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"读取文献失败: {str(e)}")
+        return jsonify({'success': False, 'error': f"读取文献失败: {str(e)}"}), 500
+

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { Waypoints, Github } from "lucide-react";
+import { Waypoints, Github, BookOpen } from "lucide-react";
 import { getVersion } from "@shared/services/api";
+import EdaLiteratureDrawer from "@features/literature/components/EdaLiteratureDrawer";
 
 /**
  * 应用头部组件
@@ -8,6 +9,7 @@ import { getVersion } from "@shared/services/api";
  */
 export default function AppHeader() {
   const [version, setVersion] = useState("v1.0.0");
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   useEffect(() => {
     const fetchVersion = async () => {
@@ -41,8 +43,19 @@ export default function AppHeader() {
             </div>
           </div>
 
-          {/* 导航链接 */}
-          <div className="flex items-center gap-4">
+          {/* 导航链接与文献入口 */}
+          <div className="flex items-center gap-3">
+            {/* E大实战文献入口 */}
+            <button
+              type="button"
+              onClick={() => setIsDrawerOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-900 bg-gradient-to-r from-amber-100 to-amber-200/80 hover:from-amber-200 hover:to-amber-300 border border-amber-300 shadow-2xs transition-all cursor-pointer"
+              title="点击阅读 E大（ETF拯救世界）网格三篇真迹"
+            >
+              <BookOpen className="w-4 h-4 text-amber-700" />
+              <span>📚 E大网格实战文献</span>
+            </button>
+
             <a
               href="https://github.com/jorben/etf-grid-design"
               target="_blank"
@@ -55,6 +68,12 @@ export default function AppHeader() {
           </div>
         </div>
       </div>
+
+      {/* E大实战文献阅读抽屉 */}
+      <EdaLiteratureDrawer
+        isOpen={isDrawerOpen}
+        onClose={() => setIsDrawerOpen(false)}
+      />
     </header>
   );
 }
