@@ -168,10 +168,165 @@ export function calculateStressTestScenario(
 /**
  * 5 大经典历史暴跌情景预设配置
  */
+/**
+ * 上涨方向压力测试推演 —— 量化上涨场景下的筹码流失、做 T 利润与踏空风险
+ *
+ * @param {Object} compositeGrid 复合网格数据 (包含 base_position, rails, merged_ladder)
+ * @param {number} totalCapital 总资金
+ * @param {number} currentPrice 基准现价
+ * @param {number} rallyPct 模拟涨幅百分比 (如 10, 20, 50，代表上涨 10%、50% 等)
+ * @param {number} commissionRate 佣金费率 (默认 0.00005)
+ * @returns {Object} 包含推演价、筹码流失率、回笼现金、做 T 利润、三轨卖出热力图等全量指标
+ */
+export function calculateRallyScenario(
+  compositeGrid,
+  totalCapital = 100000,
+  currentPrice = 1.0,
+  rallyPct = 20,
+  commissionRate = 0.00005
+) {
+  if (!compositeGrid || !currentPrice) {
+    return null;
+  }
+
+  const basePos = compositeGrid.base_position || {};
+  const baseShares = basePos.shares || 0;
+
+  // 1. 模拟目标上涨价格
+  const safeRallyPct = Math.max(0, Math.min(80, rallyPct));
+  const targetPrice = Number((currentPrice * (1 + safeRallyPct / 100)).toFixed(3));
+
+  // 2. 筛选并按价格从低到高排列所有卖出档位
+  const sellOrders = (compositeGrid.merged_ladder || [])
+    .filter((item) => item.action === "SELL")
+    .sort((a, b) => a.price - b.price);
+
+  // 3. 统计已触发卖出档位、卖出份额与回笼现金
+  let triggeredSellShares = 0;
+  let triggeredSellAmount = 0;
+  let triggeredSellFee = 0;
+  let triggeredSellProfit = 0;
+  const triggeredOrders = [];
+
+  // 各轨卖出触发情况统计
+  const railStats = {
+    small: { name: "小网 (高频止盈)", tag: "小网", total: 0, triggered: 0, shares: 0, amount: 0, profit: 0, color: "emerald" },
+    medium: { name: "中网 (波段止盈)", tag: "中网", total: 0, triggered: 0, shares: 0, amount: 0, profit: 0, color: "blue" },
+    large: { name: "大网 (趋势止盈)", tag: "大网", total: 0, triggered: 0, shares: 0, amount: 0, profit: 0, color: "purple" },
+  };
+
+  sellOrders.forEach((order) => {
+    const railKey = order.rail || "small";
+    if (railStats[railKey]) {
+      railStats[railKey].total += 1;
+    }
+
+    // 判定是否被当前涨幅触发 (目标价 >= 卖单触发价)
+    if (targetPrice >= order.price) {
+      triggeredSellShares += order.shares;
+      triggeredSellAmount += order.amount;
+      triggeredSellFee += order.amount * commissionRate;
+      triggeredSellProfit += (order.est_profit || 0);
+      triggeredOrders.push(order);
+
+      if (railStats[railKey]) {
+        railStats[railKey].triggered += 1;
+        railStats[railKey].shares += order.shares;
+        railStats[railKey].amount += order.amount;
+        railStats[railKey].profit += (order.est_profit || 0);
+      }
+    }
+  });
+
+  // 计算各轨卖出百分比
+  Object.keys(railStats).forEach((k) => {
+    const r = railStats[k];
+    r.amount = Number(r.amount.toFixed(2));
+    r.profit = Number(r.profit.toFixed(2));
+    r.pct = r.total > 0 ? Number(((r.triggered / r.total) * 100).toFixed(1)) : 0;
+  });
+
+  // 4. 筹码流失率与剩余持仓
+  const chipLossRatio = baseShares > 0 ? Number(Math.min(100, (triggeredSellShares / baseShares) * 100).toFixed(1)) : 0;
+  const remainingShares = Math.max(0, baseShares - triggeredSellShares);
+
+  // 5. 回笼现金
+  const returnedCash = Number((triggeredSellAmount - triggeredSellFee).toFixed(2));
+
+  // 6. 累计做 T 利润
+  const totalProfit = Number(triggeredSellProfit.toFixed(2));
+
+  // 7. 利润池模式 B 联动：计算可兑换免费份额数
+  const freeSharesFromProfit = targetPrice > 0
+    ? Math.floor(totalProfit / targetPrice / 100) * 100
+    : 0;
+
+  // 8. 卖飞临界涨幅 (最高卖出档位对应的涨幅)
+  const highestSellOrder = sellOrders.length > 0 ? sellOrders[sellOrders.length - 1] : null;
+  const soldOutRallyPct = (highestSellOrder && currentPrice > 0)
+    ? Number((((highestSellOrder.price - currentPrice) / currentPrice) * 100).toFixed(1))
+    : null;
+  const isBeyondGrid = Boolean(soldOutRallyPct && safeRallyPct > soldOutRallyPct);
+
+  // 9. 安全状态分级判定 (基于筹码流失率)
+  let safetyLevel = "safe";
+  let safetyLabel = "持仓充裕";
+  let safetyBadgeColor = "emerald";
+
+  if (chipLossRatio > 90) {
+    safetyLevel = "critical";
+    safetyLabel = "近乎空仓 · 踏空风险";
+    safetyBadgeColor = "red";
+  } else if (chipLossRatio > 60) {
+    safetyLevel = "warning";
+    safetyLabel = "筹码稀薄";
+    safetyBadgeColor = "amber";
+  } else if (chipLossRatio > 30) {
+    safetyLevel = "moderate";
+    safetyLabel = "稳步止盈";
+    safetyBadgeColor = "sky";
+  }
+
+  return {
+    currentPrice,
+    rallyPct: safeRallyPct,
+    targetPrice,
+    basePosition: {
+      shares: baseShares,
+    },
+    triggeredSellShares,
+    triggeredSellAmount: Number(triggeredSellAmount.toFixed(2)),
+    chipLossRatio,
+    remainingShares,
+    returnedCash,
+    totalProfit,
+    freeSharesFromProfit,
+    soldOutRallyPct,
+    isBeyondGrid,
+    safetyLevel,
+    safetyLabel,
+    safetyBadgeColor,
+    railStats,
+    triggeredOrdersCount: triggeredOrders.length,
+    totalSellOrdersCount: sellOrders.length,
+  };
+}
+
 export const STRESS_TEST_PRESETS = [
   { drop: 10, label: "-10% 日常回调", desc: "日常正常波段下挫，小网逐步吸收筹码" },
   { drop: 20, label: "-20% 技术熊市", desc: "技术性熊市分水岭，小网吃满，中网启动" },
   { drop: 30, label: "-30% 深度黄金坑", desc: "行业中级深度调整，中网大部分被击穿" },
   { drop: 40, label: "★ -40% 极值回撤", desc: "E大经典极值铁底，大网大口吞进巨鲸筹码" },
   { drop: 50, label: "-50% 世纪极值", desc: "罕见历史极端测试，检验最后底线安全垫" },
+];
+
+/**
+ * 5 大经典上涨情景预设配置
+ */
+export const RALLY_TEST_PRESETS = [
+  { rally: 10, label: "+10% 日常反弹", desc: "日常正常波段反弹，小网逐步卖出止盈" },
+  { rally: 20, label: "+20% 波段牛市", desc: "波段牛市区间，小网全部出清，中网开始止盈" },
+  { rally: 30, label: "+30% 行业景气", desc: "行业中级上涨，中网大部分止盈" },
+  { rally: 50, label: "★ +50% 牛市主升浪", desc: "E大经典牛市场景，检验留利润能力" },
+  { rally: 80, label: "+80% 历史级牛市", desc: "极端上涨测试，底仓几乎全部卖出" },
 ];

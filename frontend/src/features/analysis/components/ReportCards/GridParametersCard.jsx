@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { formatCurrency, formatPercent, formatDate, formatTimestamp } from "@shared/utils";
 import StressTestSandboxCard from "./StressTestSandboxCard";
+import { ETF_CATEGORIES } from "@shared/constants/etfCategories";
 
 const GridParametersCard = ({
   gridStrategy,
@@ -414,6 +415,25 @@ const GridParametersCard = ({
             </div>
           )}
         </div>
+
+        {/* T+0 交易制度提示横幅 */}
+        {(() => {
+          const etfCode = inputParameters?.etfCode || "";
+          const isT0 = ETF_CATEGORIES.some(cat =>
+            (cat.items || []).some(item => item.code === etfCode && item.tag && item.tag.includes("T+0"))
+          );
+          if (!isT0) return null;
+          return (
+            <div className="p-3 rounded-xl border flex items-center gap-3 bg-amber-50/90 border-amber-300 text-amber-900 shadow-xs mt-2">
+              <span className="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-100 text-amber-800 border-amber-300 shrink-0">
+                ★ T+0 跨境标的
+              </span>
+              <span className="text-xs font-medium">
+                该标的支持日内回转交易（T+0），买入后当日即可卖出。回测引擎将自动采用 T+0 撮合模式，精确模拟日内做 T 的资金循环效率。
+              </span>
+            </div>
+          );
+        })()}
 
         {/* 网格价格水平与做T挂单阶梯 */}
         {(gridStrategy.composite_grid || gridStrategy.price_levels) && (

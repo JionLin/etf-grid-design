@@ -35,6 +35,28 @@ class ETFConstants:
     MIN_ANALYSIS_DAYS = 30
     MAX_ANALYSIS_DAYS = 1000
 
+    # T+0 交易制度标的代码集合（跨境 QDII ETF）
+    # 注意：前端 etfCategories.js 中 tag 含 "★天然T+0" 的标的需与此处保持同步
+    T0_ETF_CODES = {
+        "513130",  # 恒生科技 ETF
+        "513180",  # 恒生科技30 ETF
+        "159920",  # 恒生 ETF
+        "513100",  # 纳指100 ETF
+        "159941",  # 纳指 ETF
+        "513500",  # 标普500 ETF
+        "513050",  # 中概互联网 ETF
+        "164824",  # 印度基金 LOF
+        "513520",  # 日经225 ETF
+        "159866",  # 日经 ETF
+        "513880",  # 日经225指数 ETF
+        "513000",  # 日经 ETF(513000)
+    }
+
+    @staticmethod
+    def is_t0_etf(code: str) -> bool:
+        """判断 ETF 代码是否为 T+0 交易制度标的"""
+        return str(code) in ETFConstants.T0_ETF_CODES
+
 
 class GridConstants:
     """网格交易常量"""

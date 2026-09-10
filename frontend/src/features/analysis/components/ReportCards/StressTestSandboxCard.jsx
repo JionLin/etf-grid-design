@@ -15,6 +15,8 @@ import {
 import {
   calculateStressTestScenario,
   STRESS_TEST_PRESETS,
+  calculateRallyScenario,
+  RALLY_TEST_PRESETS,
 } from "@shared/utils/stressTestCalculator";
 
 /**
@@ -26,8 +28,14 @@ const StressTestSandboxCard = ({
   totalCapital = 30000,
   currentPrice = 1.0,
 }) => {
+  // 方向切换: "down" 下跌防穿透 | "up" 上涨防踏空
+  const [direction, setDirection] = useState("down");
+
   // 当前推演跌幅百分比 (默认 20%)
   const [dropPct, setDropPct] = useState(20);
+
+  // 当前推演涨幅百分比 (默认 20%)
+  const [rallyPct, setRallyPct] = useState(20);
 
   // 毫秒级计算推演全量指标
   const result = useMemo(() => {
@@ -38,6 +46,16 @@ const StressTestSandboxCard = ({
       dropPct
     );
   }, [compositeGrid, totalCapital, currentPrice, dropPct]);
+
+  // 上涨推演全量指标
+  const rallyResult = useMemo(() => {
+    return calculateRallyScenario(
+      compositeGrid,
+      totalCapital,
+      currentPrice,
+      rallyPct
+    );
+  }, [compositeGrid, totalCapital, currentPrice, rallyPct]);
 
   if (!compositeGrid || !result) {
     return null;
@@ -111,6 +129,37 @@ const StressTestSandboxCard = ({
           </span>
         </div>
       </div>
+
+      {/* 方向切换 Tab */}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setDirection("down")}
+          className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 border ${
+            direction === "down"
+              ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+          }`}
+        >
+          <ShieldAlert className="w-4 h-4" />
+          🛡️ 下跌防穿透
+        </button>
+        <button
+          type="button"
+          onClick={() => setDirection("up")}
+          className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 border ${
+            direction === "up"
+              ? "bg-slate-900 text-white border-slate-900 shadow-xs"
+              : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+          }`}
+        >
+          <ArrowUp className="w-4 h-4" />
+          🚀 上涨防踏空
+        </button>
+      </div>
+
+      {/* ========== 下跌防穿透面板 ========== */}
+      {direction === "down" && (<>
 
       {/* 1. 交互推演控制区：情景预设胶囊 + 平滑跌幅滑块 */}
       <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-2xs">
@@ -425,6 +474,282 @@ const StressTestSandboxCard = ({
           </div>
         </div>
       </div>
+
+      </>)}
+
+      {/* ========== 上涨防踏空面板 ========== */}
+      {direction === "up" && rallyResult && (<>
+
+      {/* 1. 上涨交互推演控制区：情景预设胶囊 + 涨幅滑块 */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-2xs">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold text-gray-700 flex items-center gap-1.5">
+            <Sliders className="w-3.5 h-3.5 text-emerald-600" />
+            模拟标的自现价上涨幅度
+          </span>
+          <div className="flex items-baseline gap-1.5 font-mono">
+            <span className="text-xs text-gray-500">推演目标价:</span>
+            <span className="text-lg font-black text-emerald-600">
+              ¥{rallyResult.targetPrice.toFixed(3)}
+            </span>
+            <span className="text-xs font-bold text-emerald-700">
+              (+{rallyPct}%)
+            </span>
+          </div>
+        </div>
+
+        {/* 5 大上涨情景预设胶囊按钮 */}
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {RALLY_TEST_PRESETS.map((p) => {
+            const isSelected = rallyPct === p.rally;
+            return (
+              <button
+                key={p.rally}
+                type="button"
+                onClick={() => setRallyPct(p.rally)}
+                title={p.desc}
+                className={`py-2 px-2.5 rounded-xl text-xs font-medium transition-all text-center flex flex-col items-center justify-center gap-0.5 border ${
+                  isSelected
+                    ? "bg-slate-900 text-white border-slate-900 shadow-xs ring-2 ring-slate-400/30 font-bold"
+                    : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                }`}
+              >
+                <span>{p.label}</span>
+                <span
+                  className={`text-[10px] ${
+                    isSelected ? "text-slate-300" : "text-gray-400"
+                  }`}
+                >
+                  ¥{(currentPrice * (1 + p.rally / 100)).toFixed(3)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 连续平滑涨幅滑块 */}
+        <div className="pt-2">
+          <div className="flex items-center justify-between text-[11px] font-mono text-gray-400 mb-1">
+            <span>0% (现价)</span>
+            <span>+20%</span>
+            <span>+40%</span>
+            <span>+60%</span>
+            <span>+80% (极限牛市)</span>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="80"
+            step="1"
+            value={rallyPct}
+            onChange={(e) => setRallyPct(Number(e.target.value))}
+            className="w-full h-2.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-emerald-700 transition-all"
+          />
+        </div>
+
+        {/* 超轨休眠状态解释横幅 */}
+        {rallyResult.isBeyondGrid && (
+          <div className="mt-3 p-3 bg-amber-50/90 border border-amber-200 rounded-xl flex items-start gap-2.5 text-xs text-amber-900 animate-fadeIn">
+            <Info className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+            <div className="space-y-0.5">
+              <div className="font-bold text-amber-950 flex items-center gap-2">
+                <span>🏖️ 超轨休眠 · 全部止盈状态</span>
+                <span className="text-[10px] bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-mono">
+                  网格最高卖出: +{rallyResult.soldOutRallyPct}% (¥{(() => { const so = (compositeGrid.merged_ladder || []).filter(i => i.action === "SELL").sort((a,b) => b.price - a.price); return so.length > 0 ? so[0].price.toFixed(3) : "—"; })()})
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-800 leading-relaxed">
+                当前模拟涨幅（+{rallyPct}%）已超出该网格预设的最高卖单（+{rallyResult.soldOutRallyPct}%）。全套卖出网格已完成止盈，底仓筹码已全部变现为现金与利润池免费份额，网格进入休眠状态。如需捕获更高涨幅，可考虑加大网格区间或追设高位卖出轨。
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 2. 四大核心态势卡片 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* 卡片 1: 筹码流失率 */}
+        <div className="p-4 rounded-xl bg-white border border-slate-200 flex flex-col justify-between shadow-2xs">
+          <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
+            <span>筹码流失率</span>
+            <span className="text-[10px] text-gray-400">
+              底仓 {rallyResult.basePosition.shares.toLocaleString()} 股
+            </span>
+          </div>
+          <div>
+            <div className="text-xl font-black font-mono text-gray-900">
+              {rallyResult.chipLossRatio}%
+            </div>
+            <div className="text-xs text-gray-500 font-mono mt-0.5 flex items-center justify-between">
+              <span>已卖出: {rallyResult.triggeredSellShares.toLocaleString()} 股</span>
+              <span className="font-bold text-slate-700">
+                剩余 {rallyResult.remainingShares.toLocaleString()} 股
+              </span>
+            </div>
+          </div>
+          <div className="mt-2.5 pt-2 border-t border-gray-100 text-[11px] text-gray-500 font-mono">
+            {rallyResult.soldOutRallyPct !== null ? (
+              <span>卖飞临界: +{rallyResult.soldOutRallyPct}%</span>
+            ) : (
+              <span className="text-emerald-700 font-medium">无卖出档位</span>
+            )}
+          </div>
+        </div>
+
+        {/* 卡片 2: 剩余持仓 */}
+        <div className="p-4 rounded-xl bg-white border border-slate-200 flex flex-col justify-between shadow-2xs">
+          <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
+            <span>剩余底仓持仓</span>
+            {rallyResult.freeSharesFromProfit > 0 && (
+              <span className="text-[10px] text-emerald-600 font-bold">
+                +{rallyResult.freeSharesFromProfit} 免费股
+              </span>
+            )}
+          </div>
+          <div>
+            <div className="text-xl font-black font-mono text-emerald-700">
+              {rallyResult.remainingShares.toLocaleString()} 股
+            </div>
+            <div className="text-xs text-gray-500 font-mono mt-0.5">
+              {rallyResult.freeSharesFromProfit > 0 ? (
+                <span>利润池可兑 {rallyResult.freeSharesFromProfit} 股免费份额 (模式B)</span>
+              ) : (
+                <span>利润池免费份额: 0 股</span>
+              )}
+            </div>
+          </div>
+          <div className="mt-2.5 pt-2 border-t border-gray-100 text-[11px] text-gray-500">
+            原始底仓 {rallyResult.basePosition.shares.toLocaleString()} 股 → 剩余 {(100 - rallyResult.chipLossRatio).toFixed(1)}%
+          </div>
+        </div>
+
+        {/* 卡片 3: 累计做 T 利润 */}
+        <div className="p-4 rounded-xl bg-white border border-slate-200 flex flex-col justify-between shadow-2xs">
+          <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
+            <span>累计做 T 利润</span>
+            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+          </div>
+          <div>
+            <div className="text-xl font-black font-mono text-emerald-700">
+              ¥{rallyResult.totalProfit.toLocaleString()}
+            </div>
+            <div className="text-xs text-gray-500 font-mono mt-0.5">
+              纯差价利润（卖高买低差额扣费后）
+            </div>
+          </div>
+          <div className="mt-2.5 pt-2 border-t border-gray-100 text-[11px] text-gray-500 font-mono">
+            已触发卖单: {rallyResult.triggeredOrdersCount} / {rallyResult.totalSellOrdersCount} 档
+          </div>
+        </div>
+
+        {/* 卡片 4: 回笼现金 & 安全评级 */}
+        <div className="p-4 rounded-xl bg-white border border-slate-200 flex flex-col justify-between shadow-2xs">
+          <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
+            <span>回笼现金 & 安全评级</span>
+          </div>
+          <div>
+            <div className="text-xl font-black font-mono text-gray-900">
+              ¥{rallyResult.returnedCash.toLocaleString()}
+            </div>
+            <div className="mt-1.5">
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold border ${
+                  {
+                    emerald: "bg-emerald-100 text-emerald-800 border-emerald-300",
+                    sky: "bg-sky-100 text-sky-800 border-sky-300",
+                    amber: "bg-amber-100 text-amber-800 border-amber-300",
+                    red: "bg-red-100 text-red-800 border-red-300",
+                  }[rallyResult.safetyBadgeColor] || "bg-emerald-100 text-emerald-800 border-emerald-300"
+                }`}
+              >
+                {rallyResult.safetyLevel === "safe" && <CheckCircle className="w-3.5 h-3.5" />}
+                {rallyResult.safetyLevel !== "safe" && <AlertTriangle className="w-3.5 h-3.5" />}
+                {rallyResult.safetyLabel}
+              </span>
+            </div>
+          </div>
+          <div className="mt-2.5 pt-2 border-t border-gray-100 text-[11px] text-gray-500 font-mono">
+            卖出金额: ¥{rallyResult.triggeredSellAmount.toLocaleString()}
+          </div>
+        </div>
+      </div>
+
+      {/* 3. 三轨卖出触发热力图 */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-2xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <h4 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+            <span>三轨卖出触发热力图</span>
+            <span className="text-[11px] text-gray-500 font-normal">
+              (涨至 ¥{rallyResult.targetPrice.toFixed(3)} 时的各轨止盈态势)
+            </span>
+          </h4>
+          <span className="text-xs text-gray-500 font-mono">
+            已止盈回笼: ¥{rallyResult.returnedCash.toLocaleString()}
+          </span>
+        </div>
+
+        <div className="space-y-3">
+          {/* 小网 */}
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-semibold text-emerald-800 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                {rallyResult.railStats.small?.name}
+              </span>
+              <span className="font-mono text-gray-600">
+                {rallyResult.railStats.small?.triggered} / {rallyResult.railStats.small?.total} 档止盈 ({rallyResult.railStats.small?.pct}%) · 利润 ¥{rallyResult.railStats.small?.profit?.toLocaleString()}
+              </span>
+            </div>
+            <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 rounded-full transition-all duration-300"
+                style={{ width: `${rallyResult.railStats.small?.pct}%` }}
+              ></div>
+            </div>
+          </div>
+
+          {/* 中网 */}
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-semibold text-blue-800 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                {rallyResult.railStats.medium?.name}
+              </span>
+              <span className="font-mono text-gray-600">
+                {rallyResult.railStats.medium?.triggered} / {rallyResult.railStats.medium?.total} 档止盈 ({rallyResult.railStats.medium?.pct}%) · 利润 ¥{rallyResult.railStats.medium?.profit?.toLocaleString()}
+              </span>
+            </div>
+            <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                style={{ width: `${rallyResult.railStats.medium?.pct}%` }}
+              ></div>
+            </div>
+          </div>
+
+          {/* 大网 */}
+          <div>
+            <div className="flex items-center justify-between text-xs mb-1">
+              <span className="font-semibold text-purple-800 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                {rallyResult.railStats.large?.name}
+              </span>
+              <span className="font-mono text-gray-600">
+                {rallyResult.railStats.large?.triggered} / {rallyResult.railStats.large?.total} 档止盈 ({rallyResult.railStats.large?.pct}%) · 利润 ¥{rallyResult.railStats.large?.profit?.toLocaleString()}
+              </span>
+            </div>
+            <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-purple-500 rounded-full transition-all duration-300"
+                style={{ width: `${rallyResult.railStats.large?.pct}%` }}
+              ></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      </>)}
+
     </div>
   );
 };

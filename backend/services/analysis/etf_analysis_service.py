@@ -17,6 +17,7 @@ from algorithms.grid.optimizer import GridOptimizer
 from .suitability_analyzer import SuitabilityAnalyzer
 from .grid_calculator import CompositeGridCalculator
 from .backtest_engine import GridBacktestEngine
+from config.constants import ETFConstants
 
 
 logger = logging.getLogger(__name__)
@@ -567,11 +568,15 @@ class ETFAnalysisService:
                 scaling_ratio=scaling_ratio
             )
 
+            # 自动识别交易制度
+            trade_mode = "t0" if ETFConstants.is_t0_etf(etf_code) else "t1"
+
             return self.backtest_engine.run_backtest(
                 daily_df=df,
                 total_capital=total_capital,
                 composite_grid=composite_grid,
                 reinvest_mode=reinvest_mode,
+                trade_mode=trade_mode,
             )
         except Exception as e:
             logger.error(f"策略历史回测执行失败: {str(e)}")

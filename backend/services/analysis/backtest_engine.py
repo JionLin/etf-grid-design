@@ -36,6 +36,7 @@ class GridBacktestEngine:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         reinvest_mode: str = "cash",
+        trade_mode: str = "t1",
     ) -> Dict[str, Any]:
         """
         执行历史网格回测
@@ -181,7 +182,10 @@ class GridBacktestEngine:
 
                 if low_price <= target_p and cash >= (buy_cost + fee):
                     cash -= (buy_cost + fee)
-                    frozen_position += shares_needed  # T+1 锁定，当日不可卖出
+                    if trade_mode == "t0":
+                        available_position += shares_needed  # T+0: 当日可卖出
+                    else:
+                        frozen_position += shares_needed  # T+1 锁定，当日不可卖出
                     total_commission += fee
                     profit = round(order.get("est_profit", 0.0), 2)
 
@@ -286,6 +290,7 @@ class GridBacktestEngine:
                 "start_date": df.iloc[0][date_col].strftime("%Y-%m-%d"),
                 "end_date": df.iloc[-1][date_col].strftime("%Y-%m-%d"),
                 "reinvest_mode": reinvest_mode,
+                "trade_mode": trade_mode,
                 "profit_pool": {
                     "enabled": reinvest_mode == "pool_shares",
                     "reinvest_mode": reinvest_mode,

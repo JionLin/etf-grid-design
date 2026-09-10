@@ -154,8 +154,13 @@ const BacktestCard = ({
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-bold text-gray-900">真实历史策略回测验证</h3>
               <span className="text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
-                50% 底仓 · T+1 严格模拟
+                {summary?.trade_mode === "t0" ? "50% 底仓 · T+0 日内回转模拟" : "50% 底仓 · T+1 严格模拟"}
               </span>
+              {summary?.trade_mode === "t0" && (
+                <span className="text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full">
+                  ★ T+0 跨境标的 · 支持日内回转交易
+                </span>
+              )}
               {stepMode === "fixed_eda" ? (
                 <span className="text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-mono">
                   🏛️ E大原版步长 (5%/15%/30%)
