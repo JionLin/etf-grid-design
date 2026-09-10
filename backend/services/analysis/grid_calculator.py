@@ -12,14 +12,20 @@ logger = logging.getLogger(__name__)
 class CompositeGridCalculator:
     """复合网格计算器"""
 
-    def __init__(self, commission_rate: float = 0.00005):
+    def __init__(self, commission_rate: float = 0.0001, min_commission: float = 0.20):
         """
         初始化计算器
 
         Args:
-            commission_rate: 券商佣金费率 (默认万分之0.5，免印花税)
+            commission_rate: 券商佣金费率 (默认万分之1，免印花税)
+            min_commission: 单笔最低佣金 (默认 0.20 元，免5)
         """
         self.commission_rate = commission_rate
+        self.min_commission = min_commission
+
+    def calculate_commission(self, amount: float) -> float:
+        """计算单笔交易佣金 (支持单笔最低保底收费门槛)"""
+        return max(self.min_commission, round(amount * self.commission_rate, 2))
 
     def calculate_composite_grid(
         self,
@@ -86,8 +92,10 @@ class CompositeGridCalculator:
                     if sell_shares == 0:
                         sell_shares = 100
                     amount = round(sell_shares * sell_price, 2)
+                    buy_cost = round(sell_shares * current_price, 2)
+                    # 卖单做T利润 = 卖出金额 - 基准买入成本 - 买卖双边佣金
+                    fee = round(self.calculate_commission(buy_cost) + self.calculate_commission(amount), 2)
                     spread = sell_price - current_price
-                    fee = amount * 2 * self.commission_rate
                     profit = round(sell_shares * spread - fee, 2)
 
                     item = {
@@ -121,8 +129,10 @@ class CompositeGridCalculator:
                     if buy_shares == 0:
                         buy_shares = 100
                     amount = round(buy_shares * buy_price, 2)
+                    sell_revenue = round(buy_shares * (buy_price + current_price * step_ratio), 2)
+                    # 买单做T利润 = 预估未来卖出金额 - 买入金额 - 买卖双边佣金
+                    fee = round(self.calculate_commission(amount) + self.calculate_commission(sell_revenue), 2)
                     spread = current_price * step_ratio
-                    fee = amount * 2 * self.commission_rate
                     profit = round(buy_shares * spread - fee, 2)
 
                     item = {

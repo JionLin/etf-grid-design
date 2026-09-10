@@ -164,8 +164,17 @@ $$P_{\text{target}} = P_0 \times (1 - \text{Drop}\%)$$
 
 ### 6.2 三轨彩虹利润归因算法
 系统在回测周期内，独立记录小网、中网、大网各自的撮合次数与纯差价贡献：
-$$\text{AttributionRatio}_k = \frac{\text{Profit}_k}{\sum \text{Profit}} \times 100\%$$
+$$\text{AttributionRatio}_k = \frac{\text{Profit}_k}{\sum \\text{Profit}} \times 100\%$$
 在看板上以**三色彩虹进度条**呈现（绿：小网 / 蓝：中网 / 紫：大网），直观揭示策略利润在不同级别振幅中的分布格局。
+
+### 6.3 券商交易费率基准模型（万 1 费率 + 最低 0.20 元保底）
+A 股 ETF 交易享有免收印花税的天然政策优势。系统在全链路量化计算中，全面采用国内主流一线券商的实盘优选标准：
+- **基准佣金费率**：买卖双边各万分之 1（$r_{\text{fee}} = 0.0001$）；
+- **免 5 最低收费门槛**：单笔交易最低收费 0.20 元（保底两毛钱）：
+  $$\text{Fee}(\text{Amount}) = \max\Big(0.20,\; \text{round}(\text{Amount} \times 0.0001,\; 2)\Big)$$
+- **双边做 T 摩擦成本**：
+  $$\text{RoundTripFee} = \text{Fee}(\text{BuyAmount}) + \text{Fee}(\text{SellAmount})$$
+挂单阶梯中的单笔预估净利润（$\text{Profit}_{\text{est}}$）、回测引擎中的逐笔扣费（`fee`）、累计佣金（`total_commission`）及模式 B 利润池转增均严格遵循此实盘费率模型，消除理论回测与实操入账之间的账目细微摩擦偏差。
 
 ---
 

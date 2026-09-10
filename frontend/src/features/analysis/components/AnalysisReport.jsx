@@ -141,6 +141,7 @@ const AnalysisReport = ({
   const targetDays = Number(input_parameters?.analysis_days || input_parameters?.analysisDays || 180);
   const targetReinvestMode = input_parameters?.reinvest_mode || input_parameters?.reinvestMode || "pool_shares";
   const targetScalingRatio = Number(input_parameters?.scaling_ratio ?? input_parameters?.scalingRatio ?? 0.0);
+  const targetStepMode = input_parameters?.step_mode || input_parameters?.stepMode || "atr";
 
   const normalizedInputParams = {
     ...input_parameters,
@@ -154,6 +155,8 @@ const AnalysisReport = ({
     reinvestMode: targetReinvestMode,
     scaling_ratio: targetScalingRatio,
     scalingRatio: targetScalingRatio,
+    step_mode: targetStepMode,
+    stepMode: targetStepMode,
   };
 
   return (
@@ -179,6 +182,7 @@ const AnalysisReport = ({
                 initialDays={targetDays}
                 reinvestMode={targetReinvestMode}
                 scalingRatio={targetScalingRatio}
+                stepMode={targetStepMode}
               />
             </div>
           )}
@@ -190,6 +194,7 @@ const AnalysisReport = ({
                 gridStrategy={grid_strategy}
                 inputParameters={normalizedInputParams}
                 totalCapital={userTotalCapital}
+                stepMode={targetStepMode}
                 strategyRationale={strategy_rationale}
                 adjustmentSuggestions={adjustment_suggestions}
                 showDetailed={true}
@@ -201,6 +206,7 @@ const AnalysisReport = ({
                 initialDays={targetDays}
                 reinvestMode={targetReinvestMode}
                 scalingRatio={targetScalingRatio}
+                stepMode={targetStepMode}
               />
             </div>
           )}
@@ -213,6 +219,7 @@ const AnalysisReport = ({
               initialDays={targetDays}
               reinvestMode={targetReinvestMode}
               scalingRatio={targetScalingRatio}
+              stepMode={targetStepMode}
             />
           )}
 

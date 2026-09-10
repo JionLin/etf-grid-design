@@ -76,7 +76,8 @@ class GridOptimizer:
             return current_price * default_step_ratio, default_step_ratio
 
     def calculate_composite_steps(self, current_price: float, atr_ratio: float,
-                                  adjustment_coefficient: float = 1.0) -> Dict[str, Dict[str, Any]]:
+                                  adjustment_coefficient: float = 1.0,
+                                  step_mode: str = 'atr') -> Dict[str, Dict[str, Any]]:
         """
         计算大中小三层复合网格的自适应步长与资金配置
 
@@ -84,6 +85,7 @@ class GridOptimizer:
             current_price: 当前价格
             atr_ratio: ATR比率
             adjustment_coefficient: 调节系数
+            step_mode: 步长模式 ('atr' 默认ATR自适应 | 'fixed_eda' E大原版固定大步长 5%/15%/30%)
 
         Returns:
             Dict包含 small, medium, large 的步长、资金比例与档位数
@@ -117,12 +119,23 @@ class GridOptimizer:
                 }
             }
 
+            eda_fixed_ratios = {
+                'small': 0.05,
+                'medium': 0.15,
+                'large': 0.30,
+            }
+
             result = {}
             for rail, conf in config_template.items():
-                multiplier = conf['base_multiplier'] * adjustment_coefficient
-                step_ratio = atr_ratio * multiplier
-                # 约束合理范围 (0.2% - 25%)
-                step_ratio = max(0.002, min(0.25, step_ratio))
+                if step_mode == 'fixed_eda':
+                    step_ratio = eda_fixed_ratios.get(rail, 0.05)
+                    multiplier = round(step_ratio / max(0.001, atr_ratio), 2)
+                else:
+                    multiplier = conf['base_multiplier'] * adjustment_coefficient
+                    step_ratio = atr_ratio * multiplier
+
+                # 约束合理范围 (0.2% - 35%，放宽上限以容纳原版 30% 大网)
+                step_ratio = max(0.002, min(0.35, step_ratio))
                 step_size = step_ratio * current_price
 
                 result[rail] = {
@@ -134,6 +147,7 @@ class GridOptimizer:
                     'step_ratio': round(step_ratio, 4),
                     'step_size': round(step_size, 4),
                     'levels_per_side': conf['levels_per_side'],
+                    'step_mode': step_mode,
                 }
             return result
         except Exception as e:

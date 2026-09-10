@@ -13,14 +13,20 @@ logger = logging.getLogger(__name__)
 class GridBacktestEngine:
     """网格策略真实历史回测引擎"""
 
-    def __init__(self, commission_rate: float = 0.00005):
+    def __init__(self, commission_rate: float = 0.0001, min_commission: float = 0.20):
         """
         初始化回测引擎
 
         Args:
-            commission_rate: 交易佣金费率 (默认万分之0.5，ETF免印花税)
+            commission_rate: 交易佣金费率 (默认万分之1，免印花税)
+            min_commission: 单笔最低佣金 (默认 0.20 元，免5)
         """
         self.commission_rate = commission_rate
+        self.min_commission = min_commission
+
+    def calculate_commission(self, amount: float) -> float:
+        """计算单笔交易佣金 (支持单笔最低保底收费门槛)"""
+        return max(self.min_commission, round(amount * self.commission_rate, 2))
 
     def run_backtest(
         self,
@@ -115,7 +121,7 @@ class GridBacktestEngine:
                 shares_needed = order["shares"]
                 if high_price >= target_p and available_position >= shares_needed:
                     trade_amt = round(shares_needed * target_p, 2)
-                    fee = round(trade_amt * self.commission_rate, 2)
+                    fee = self.calculate_commission(trade_amt)
                     profit = round(order.get("est_profit", shares_needed * (target_p - start_price)), 2)
 
                     if reinvest_mode == "pool_shares":
@@ -171,7 +177,7 @@ class GridBacktestEngine:
                 target_p = order["price"]
                 shares_needed = order["shares"]
                 buy_cost = round(shares_needed * target_p, 2)
-                fee = round(buy_cost * self.commission_rate, 2)
+                fee = self.calculate_commission(buy_cost)
 
                 if low_price <= target_p and cash >= (buy_cost + fee):
                     cash -= (buy_cost + fee)

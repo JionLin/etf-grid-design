@@ -51,6 +51,11 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
     initialValues?.scalingRatio !== undefined ? Number(initialValues.scalingRatio) : 0.0,
   );
   const [enableScaling, setEnableScaling] = useState(Number(scalingRatio) > 0);
+  // 步长生成模式：'atr' 默认ATR自适应 | 'fixed_eda' E大原版经典大步长(5%/15%/30%)
+  const [stepMode, setStepMode] = usePersistedState(
+    "stepMode",
+    initialValues?.stepMode || "atr",
+  );
 
   const [popularETFs, setPopularETFs] = useState([]);
   const [capitalPresets, setCapitalPresets] = useState([]);
@@ -190,6 +195,7 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
       analysisDays: parseInt(analysisDays, 10) || 180,
       scalingRatio: enableScaling ? parseFloat(scalingRatio) : 0.0,
       reinvestMode,
+      stepMode,
     };
 
     // 检查用户是否需要重新确认免责声明
@@ -301,6 +307,53 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
             >
               <div className="font-semibold text-xs">365 天</div>
               <div className="text-[10px] opacity-75 mt-0.5">年度大箱体 · 防守</div>
+            </button>
+          </div>
+        </div>
+
+        {/* 步长生成模式选择器 (ATR自适应 vs E大原版5%/15%/30%) */}
+        <div>
+          <div className="flex justify-between items-center mb-2">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+              <TrendingUp className="w-4 h-4 text-indigo-600" />
+              步长生成模式
+            </label>
+            <span className="text-xs text-indigo-700 font-medium">
+              {stepMode === "fixed_eda" ? "🏛️ E大原版 5%/15%/30%" : "★ 🌊 ATR 动态自适应"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setStepMode("atr")}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-left transition-all ${
+                stepMode === "atr"
+                  ? "bg-indigo-50/90 border-indigo-500 text-indigo-900 ring-2 ring-indigo-400/40 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs text-indigo-950 flex items-center gap-1">
+                <span>★ 🌊 ATR 动态自适应 (默认)</span>
+              </div>
+              <div className="text-[10px] text-gray-500 mt-0.5">
+                基于14日波幅自适应计算(小网~1.9%/中网~3.8%/大网~7.9%)，适合高频做T现金流
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setStepMode("fixed_eda")}
+              className={`py-2 px-3 text-xs font-medium rounded-lg border text-left transition-all ${
+                stepMode === "fixed_eda"
+                  ? "bg-amber-50/90 border-amber-500 text-amber-900 ring-2 ring-amber-400/40 font-bold shadow-xs"
+                  : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50"
+              }`}
+            >
+              <div className="font-semibold text-xs text-amber-950 flex items-center gap-1">
+                <span>🏛️ E大原版经典大步长</span>
+              </div>
+              <div className="text-[10px] text-gray-500 mt-0.5">
+                小网 5% / 中网 15% / 大网 30%，跨度宏大、交易频率低，适合长周期守株待兔
+              </div>
             </button>
           </div>
         </div>

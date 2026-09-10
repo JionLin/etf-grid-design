@@ -78,10 +78,15 @@ def analyze_etf_strategy():
         scaling_ratio = float(data.get('scalingRatio', data.get('scaling_ratio', 0.0)))
         if scaling_ratio < 0.0 or scaling_ratio > 0.50:
             scaling_ratio = 0.0
+
+        # 获取步长生成模式（可选参数，默认'atr'，支持'atr'或'fixed_eda'）
+        step_mode = str(data.get('stepMode', data.get('step_mode', 'atr')))
+        if step_mode not in ['atr', 'fixed_eda']:
+            step_mode = 'atr'
         
         from flask import current_app
         current_app.logger.info(f"开始分析ETF策略: {etf_code}, 资金{total_capital}, "
-                   f"{grid_type}网格, {risk_preference}, 加码{scaling_ratio}, 周期{analysis_days}天")
+                   f"{grid_type}网格, {risk_preference}, 加码{scaling_ratio}, 步长模式{step_mode}, 周期{analysis_days}天")
         
         # 执行分析
         analysis_result = etf_service.analyze_etf_strategy(
@@ -92,6 +97,7 @@ def analyze_etf_strategy():
             adjustment_coefficient=adjustment_coefficient,
             analysis_days=analysis_days,
             scaling_ratio=scaling_ratio,
+            step_mode=step_mode,
         )
         
         current_app.logger.info(f"ETF策略分析完成: {etf_code}, "
@@ -132,6 +138,9 @@ def run_backtest():
         adjustment_coefficient = float(data.get('adjustmentCoefficient', 1.0))
         scaling_ratio = float(data.get('scalingRatio', data.get('scaling_ratio', 0.0)))
         reinvest_mode = str(data.get('reinvestMode', data.get('reinvest_mode', 'cash')))
+        step_mode = str(data.get('stepMode', data.get('step_mode', 'atr')))
+        if step_mode not in ['atr', 'fixed_eda']:
+            step_mode = 'atr'
 
         result = etf_service.run_strategy_backtest(
             etf_code=etf_code,
@@ -140,6 +149,7 @@ def run_backtest():
             adjustment_coefficient=adjustment_coefficient,
             scaling_ratio=scaling_ratio,
             reinvest_mode=reinvest_mode,
+            step_mode=step_mode,
         )
 
         return jsonify({'success': True, 'data': result})

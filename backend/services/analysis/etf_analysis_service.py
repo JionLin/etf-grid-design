@@ -177,7 +177,8 @@ class ETFAnalysisService:
                            grid_type: str, risk_preference: str,
                            adjustment_coefficient: float = 1.0,
                            analysis_days: int = 180,
-                           scaling_ratio: float = 0.0) -> Dict:
+                           scaling_ratio: float = 0.0,
+                           step_mode: str = 'atr') -> Dict:
         """
         完整的ETF网格交易策略分析
         
@@ -223,6 +224,7 @@ class ETFAnalysisService:
                 risk_preference=risk_preference,
                 adjustment_coefficient=adjustment_coefficient,
                 scaling_ratio=scaling_ratio,
+                step_mode=step_mode,
             )
             
             # 5. 生成策略分析依据
@@ -257,6 +259,10 @@ class ETFAnalysisService:
                     'adjustmentCoefficient': adjustment_coefficient,
                     'analysis_days': analysis_days,
                     'analysisDays': analysis_days,
+                    'scaling_ratio': scaling_ratio,
+                    'scalingRatio': scaling_ratio,
+                    'step_mode': step_mode,
+                    'stepMode': step_mode,
                 }
             }
             
@@ -396,7 +402,8 @@ class ETFAnalysisService:
                                  atr_analysis: Dict, market_indicators: Dict,
                                  total_capital: float, grid_type: str,
                                  risk_preference: str, adjustment_coefficient: float = 1.0,
-                                 scaling_ratio: float = 0.0) -> Dict:
+                                 scaling_ratio: float = 0.0,
+                                 step_mode: str = 'atr') -> Dict:
         """
         计算网格策略参数（使用算法模块）
         
@@ -459,7 +466,7 @@ class ETFAnalysisService:
 
             # 9. 计算大中小三层复合网格 (20%:35%:45% 分层多轨与合并阶梯)
             composite_steps = self.grid_optimizer.calculate_composite_steps(
-                current_price, atr_ratio, adjustment_coefficient
+                current_price, atr_ratio, adjustment_coefficient, step_mode=step_mode
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, current_price, composite_steps, base_position_ratio=0.5,
@@ -514,6 +521,7 @@ class ETFAnalysisService:
         adjustment_coefficient: float = 1.0,
         scaling_ratio: float = 0.0,
         reinvest_mode: str = 'cash',
+        step_mode: str = 'atr',
     ) -> Dict[str, Any]:
         """
         运行策略历史回测
@@ -525,6 +533,7 @@ class ETFAnalysisService:
             adjustment_coefficient: 调节系数
             scaling_ratio: 逐格加码比例 (默认 0.0)
             reinvest_mode: 做T收益模式 ('cash' 全额留现金, 'pool_shares' 利润池滚存留股)
+            step_mode: 步长模式 ('atr' | 'fixed_eda')
 
         Returns:
             回测报告
@@ -541,7 +550,7 @@ class ETFAnalysisService:
             atr_ratio = atr_analysis['current_atr_ratio']
 
             composite_steps = self.grid_optimizer.calculate_composite_steps(
-                current_price, atr_ratio, adjustment_coefficient
+                current_price, atr_ratio, adjustment_coefficient, step_mode=step_mode
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, current_price, composite_steps, base_position_ratio=0.5,

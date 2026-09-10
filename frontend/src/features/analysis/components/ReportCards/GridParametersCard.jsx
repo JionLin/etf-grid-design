@@ -31,6 +31,7 @@ const GridParametersCard = ({
   gridStrategy,
   inputParameters,
   totalCapital,
+  stepMode,
   strategyRationale,
   adjustmentSuggestions,
   showDetailed = false,
@@ -382,6 +383,15 @@ const GridParametersCard = ({
                     <span className="text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
                       大中小三轨合一
                     </span>
+                    {(stepMode === "fixed_eda" || inputParameters?.stepMode === "fixed_eda") ? (
+                      <span className="text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-mono">
+                        🏛️ E大原版 5%/15%/30%
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-mono">
+                        🌊 ATR 动态自适应
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-gray-500">已按整百股数对齐，可直接对照在证券交易软件中设置条件单</p>
                 </div>
