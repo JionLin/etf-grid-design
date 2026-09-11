@@ -57,6 +57,29 @@ def get_etf_basic_info(etf_code):
             'error': '获取ETF信息失败，请检查代码是否正确'
         }), 500
 
+@etf_bp.route('/api/etf/valuation/<etf_code>', methods=['GET'])
+def get_etf_valuation(etf_code):
+    """获取ETF估值温度计分析"""
+    try:
+        if not etf_code or len(etf_code) != 6 or not etf_code.isdigit():
+            return jsonify({
+                'success': False,
+                'error': 'ETF代码格式错误，请输入6位数字'
+            }), 400
+
+        valuation_data = etf_service.get_etf_valuation(etf_code)
+        return jsonify({
+            'success': True,
+            'data': valuation_data
+        })
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"获取ETF估值分析失败: {etf_code}, {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': '获取估值信息失败，请稍后重试'
+        }), 500
+
 @etf_bp.route('/api/capital-presets', methods=['GET'])
 def get_capital_presets():
     """获取预设资金选项"""

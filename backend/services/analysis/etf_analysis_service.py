@@ -17,6 +17,7 @@ from algorithms.grid.optimizer import GridOptimizer
 from .suitability_analyzer import SuitabilityAnalyzer
 from .grid_calculator import CompositeGridCalculator
 from .backtest_engine import GridBacktestEngine
+from .valuation_engine import ValuationEngine
 from config.constants import ETFConstants
 
 
@@ -51,6 +52,7 @@ class ETFAnalysisService:
         self.suitability_analyzer = suitability_analyzer or SuitabilityAnalyzer()
         self.composite_grid_calculator = CompositeGridCalculator()
         self.backtest_engine = GridBacktestEngine()
+        self.valuation_engine = ValuationEngine(getattr(self.akshare_client, 'cache', None))
         
         # 热门ETF列表 (涵盖宽基指数、稳定行业与景气行业核心标的)
         self.popular_etfs = [
@@ -86,6 +88,11 @@ class ETFAnalysisService:
     def get_popular_etfs(self) -> List[Dict]:
         """获取热门ETF列表"""
         return self.popular_etfs
+
+    def get_etf_valuation(self, etf_code: str) -> Dict:
+        """获取指定ETF的估值温度计数据"""
+        return self.valuation_engine.evaluate_valuation(etf_code)
+
     
     def get_etf_basic_info(self, etf_code: str) -> Dict:
         """
@@ -210,10 +217,13 @@ class ETFAnalysisService:
             if not latest_price_info:
                 raise ValueError(f"未获取到ETF最新价格: {etf_code}")
             
-            # 4. 执性适宜度评估
-            suitability_result = self.suitability_analyzer.comprehensive_evaluation(df, etf_info)
+            # 4. 获取估值分析
+            valuation_info = self.valuation_engine.evaluate_valuation(etf_code)
+
+            # 5. 执行适宜度评估 (传入估值信息)
+            suitability_result = self.suitability_analyzer.comprehensive_evaluation(df, etf_info, valuation_info=valuation_info)
             
-            # 5. 计算网格策略参数（使用算法模块）
+            # 6. 计算网格策略参数（使用算法模块）
             atr_analysis = suitability_result['atr_analysis']
             market_indicators = suitability_result['market_indicators']
             
@@ -245,6 +255,7 @@ class ETFAnalysisService:
                 'etf_info': etf_info,
                 'data_quality': suitability_result['data_quality'],
                 'suitability_evaluation': suitability_result,
+                'valuation': valuation_info,
                 'grid_strategy': grid_params,
                 'strategy_rationale': strategy_rationale,
                 'adjustment_suggestions': adjustment_suggestions,

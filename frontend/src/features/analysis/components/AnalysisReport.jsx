@@ -8,6 +8,7 @@ import Disclaimer from "./Disclaimer";
 import SuitabilityCard from "./ReportCards/SuitabilityCard";
 import GridParametersCard from "./ReportCards/GridParametersCard";
 import BacktestCard from "./ReportCards/BacktestCard";
+import ValuationGaugeCard from "./ReportCards/ValuationGaugeCard";
 
 /**
  * 分析报告容器组件
@@ -81,6 +82,7 @@ const AnalysisReport = ({
     etf_info,
     data_quality,
     suitability_evaluation,
+    valuation,
     grid_strategy,
     strategy_rationale,
     adjustment_suggestions,
@@ -169,6 +171,7 @@ const AnalysisReport = ({
           {/* 概览标签页 */}
           {activeTab === "overview" && (
             <div className="space-y-6">
+              <ValuationGaugeCard valuation={valuation || suitability_evaluation?.valuation_summary} />
               <OverviewTab
                 etfInfo={etf_info}
                 suitabilityEvaluation={suitability_evaluation}
@@ -227,6 +230,7 @@ const AnalysisReport = ({
           {activeTab === "suitability" && (
             <SuitabilityCard
               evaluation={suitability_evaluation}
+              valuation={valuation || suitability_evaluation?.valuation_summary}
               dataQuality={data_quality}
               showDetailed={true}
             />

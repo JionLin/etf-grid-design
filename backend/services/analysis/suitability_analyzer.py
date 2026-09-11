@@ -6,10 +6,15 @@
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import logging
-from algorithms.atr.analyzer import ATRAnalyzer
-from algorithms.atr.calculator import ATRCalculator, calculate_volatility, calculate_adx
+try:
+    from algorithms.atr.analyzer import ATRAnalyzer
+    from algorithms.atr.calculator import ATRCalculator, calculate_volatility, calculate_adx
+except ImportError:
+    from backend.algorithms.atr.analyzer import ATRAnalyzer
+    from backend.algorithms.atr.calculator import ATRCalculator, calculate_volatility, calculate_adx
+
 
 logger = logging.getLogger(__name__)
 
@@ -271,13 +276,14 @@ class SuitabilityAnalyzer:
                 'completeness_desc': '无法评估数据完整性'
             }
     
-    def comprehensive_evaluation(self, df: pd.DataFrame, etf_info: Dict) -> Dict:
+    def comprehensive_evaluation(self, df: pd.DataFrame, etf_info: Dict, valuation_info: Optional[Dict] = None) -> Dict:
         """
         综合适宜度评估
         
         Args:
             df: 历史数据DataFrame
             etf_info: ETF基础信息
+            valuation_info: 估值分析信息(可选)
             
         Returns:
             综合评估结果
@@ -325,18 +331,29 @@ class SuitabilityAnalyzer:
                 recommendation = "该标的不推荐进行网格交易"
                 risk_level = "高"
             
-            # 7. 检查致命缺陷
+            # 7. 检查致命缺陷 (包含技术面与估值泡沫致命缺陷)
             fatal_flaws = []
             if amplitude_eval['score'] == 0:
                 fatal_flaws.append("振幅不足")
             if liquidity_eval['score'] <= 1:
                 fatal_flaws.append("流动性严重不足")
+            if valuation_info and valuation_info.get('is_fatal_flaw'):
+                fatal_flaws.append(valuation_info.get('fatal_flaw_reason', '估值处于历史极端高位'))
             
             has_fatal_flaw = len(fatal_flaws) > 0
             if has_fatal_flaw:
                 conclusion = "存在严重缺陷"
                 recommendation = f"不推荐：{', '.join(fatal_flaws)}"
                 risk_level = "极高"
+            
+            evaluations_dict = {
+                'amplitude': amplitude_eval,
+                'volatility': volatility_eval,
+                'market_characteristics': market_eval,
+                'liquidity': liquidity_eval
+            }
+            if valuation_info:
+                evaluations_dict['valuation'] = valuation_info
             
             return {
                 'total_score': total_score,
@@ -346,12 +363,7 @@ class SuitabilityAnalyzer:
                 'risk_level': risk_level,
                 'has_fatal_flaw': has_fatal_flaw,
                 'fatal_flaws': fatal_flaws,
-                'evaluations': {
-                    'amplitude': amplitude_eval,
-                    'volatility': volatility_eval,
-                    'market_characteristics': market_eval,
-                    'liquidity': liquidity_eval
-                },
+                'evaluations': evaluations_dict,
                 'data_quality': data_quality,
                 'atr_analysis': atr_analysis,
                 'market_indicators': {
@@ -359,8 +371,10 @@ class SuitabilityAnalyzer:
                     'adx_value': adx_value,
                     'avg_amount': avg_amount,
                     'volume_stability': volume_stability
-                }
+                },
+                'valuation_summary': valuation_info
             }
+
             
         except Exception as e:
             logger.error(f"综合适宜度评估失败: {str(e)}")
