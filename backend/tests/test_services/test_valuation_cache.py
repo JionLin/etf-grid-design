@@ -44,3 +44,14 @@ def test_valuation_unknown_code_fallback(temp_cache):
     res = temp_cache.get_valuation_with_fallback("999999", trade_date="20260909")
     assert res["is_fallback"] is True
     assert res["tier"] == "适温合理"
+    assert res["index_code"] is None
+
+def test_valuation_expanded_mapping_fallback(temp_cache):
+    # 验证新补全的 512170 与 515030 能够正确定位至对应指数
+    res_med = temp_cache.get_valuation_with_fallback("512170", trade_date="20260909")
+    assert res_med["index_code"] == "399989"
+    assert res_med["name"] == "中证医疗"
+
+    res_ev = temp_cache.get_valuation_with_fallback("515030", trade_date="20260909")
+    assert res_ev["index_code"] == "399976"
+    assert res_ev["name"] == "CS新能车"

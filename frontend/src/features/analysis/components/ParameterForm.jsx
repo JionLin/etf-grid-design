@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Settings, Clock, Calendar, PiggyBank, Layers, TrendingUp, Sparkles, Anchor } from "lucide-react";
+import { Settings, Clock, Calendar, PiggyBank, Layers, TrendingUp, Sparkles, Anchor, Plus, Minus, RotateCcw, Sliders, AlertCircle } from "lucide-react";
 import { usePersistedState } from "@shared/hooks";
 import { validateETFCode, validateCapital } from "@shared/utils/validation";
 import { checkDisclaimerStatus, acceptDisclaimer } from "@shared/utils/disclaimer";
@@ -56,6 +56,11 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
     "stepMode",
     initialValues?.stepMode || "atr",
   );
+  // E大原版自定义步长百分比：默认小网5%、中网15%、大网30%
+  const [edaSteps, setEdaSteps] = usePersistedState(
+    "edaSteps",
+    initialValues?.edaSteps || { small: 5, medium: 15, large: 30 },
+  );
   // 自定义基准价格模式：'market' 最新市场价 (默认) | 'custom' 自定义成本价
   const [benchmarkMode, setBenchmarkMode] = useState(
     initialValues?.benchmarkPrice ? "custom" : "market",
@@ -98,6 +103,9 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
         initialValues.adjustmentCoefficient !== adjustmentCoefficient
       ) {
         setAdjustmentCoefficient(initialValues.adjustmentCoefficient);
+      }
+      if (initialValues.edaSteps) {
+        setEdaSteps(initialValues.edaSteps);
       }
     }
   }, [
@@ -168,6 +176,63 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
     }
   }, [etfCode]);
 
+  // E大原版步长防呆校验
+  const getEdaStepError = () => {
+    if (stepMode !== "fixed_eda") return null;
+    const s = Number(edaSteps?.small);
+    const m = Number(edaSteps?.medium);
+    const l = Number(edaSteps?.large);
+    if (isNaN(s) || isNaN(m) || isNaN(l) || s === "" || m === "" || l === "") {
+      return "请输入完整且合法的步长数值";
+    }
+    if (s < 1) return "小网步长最低为 1%";
+    if (s >= m) return `小网步长 (${s}%) 必须小于中网步长 (${m}%)`;
+    if (m >= l) return `中网步长 (${m}%) 必须小于大网步长 (${l}%)`;
+    if (l > 50) return "大网步长最高为 50%";
+    return null;
+  };
+
+  const edaStepError = getEdaStepError();
+
+  // 处理步进按钮加减
+  const handleStepChange = (rail, delta) => {
+    setEdaSteps((prev) => {
+      const current = { ...(prev || { small: 5, medium: 15, large: 30 }) };
+      const currentVal = Number(current[rail]);
+      const nextVal = currentVal + delta;
+
+      if (rail === "small") {
+        if (delta > 0 && nextVal >= Number(current.medium)) return prev;
+        if (delta < 0 && nextVal < 1) return prev;
+      } else if (rail === "medium") {
+        if (delta > 0 && nextVal >= Number(current.large)) return prev;
+        if (delta < 0 && nextVal <= Number(current.small)) return prev;
+      } else if (rail === "large") {
+        if (delta > 0 && nextVal > 50) return prev;
+        if (delta < 0 && nextVal <= Number(current.medium)) return prev;
+      }
+
+      return {
+        ...current,
+        [rail]: nextVal,
+      };
+    });
+  };
+
+  // 处理输入框手动输入
+  const handleStepInput = (rail, rawVal) => {
+    const val = rawVal === "" ? "" : parseInt(rawVal, 10);
+    setEdaSteps((prev) => ({
+      ...(prev || { small: 5, medium: 15, large: 30 }),
+      [rail]: isNaN(val) ? "" : val,
+    }));
+  };
+
+  // 一键恢复默认
+  const handleResetEdaSteps = () => {
+    setEdaSteps({ small: 5, medium: 15, large: 30 });
+  };
+
   // 表单验证
   const validateForm = () => {
     const newErrors = {};
@@ -179,6 +244,10 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
     const capitalValidation = validateCapital(parseFloat(totalCapital));
     if (!capitalValidation.isValid) {
       newErrors.totalCapital = capitalValidation.error;
+    }
+
+    if (stepMode === "fixed_eda" && edaStepError) {
+      newErrors.edaSteps = edaStepError;
     }
 
     setErrors(newErrors);
@@ -203,6 +272,12 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
       scalingRatio: enableScaling ? parseFloat(scalingRatio) : 0.0,
       reinvestMode,
       stepMode,
+      edaSteps: stepMode === "fixed_eda" ? edaSteps : undefined,
+      edaStepRatios: stepMode === "fixed_eda" ? {
+        small: Number(edaSteps.small) / 100,
+        medium: Number(edaSteps.medium) / 100,
+        large: Number(edaSteps.large) / 100,
+      } : undefined,
       benchmarkPrice: (benchmarkMode === "custom" && customPrice) ? parseFloat(customPrice) : null,
     };
 
@@ -400,7 +475,7 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
               步长生成模式
             </label>
             <span className="text-xs text-indigo-700 font-medium">
-              {stepMode === "fixed_eda" ? "🏛️ E大原版 5%/15%/30%" : "★ 🌊 ATR 动态自适应"}
+              {stepMode === "fixed_eda" ? `🏛️ E大原版 ${edaSteps?.small || 5}%/${edaSteps?.medium || 15}%/${edaSteps?.large || 30}%` : "★ 🌊 ATR 动态自适应"}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -433,10 +508,170 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
                 <span>🏛️ E大原版经典大步长</span>
               </div>
               <div className="text-[10px] text-gray-500 mt-0.5">
-                小网 5% / 中网 15% / 大网 30%，跨度宏大、交易频率低，适合长周期守株待兔
+                默认小网 5% / 中网 15% / 大网 30%，跨度宏大、交易频率低，适合长周期守株待兔
               </div>
             </button>
           </div>
+
+          {/* E大原版模式下展开的步长微调区 */}
+          {stepMode === "fixed_eda" && (
+            <div className="mt-3 p-3 bg-amber-50/70 border border-amber-200/90 rounded-xl space-y-2.5">
+              <div className="flex items-center justify-between border-b border-amber-200/70 pb-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-950">
+                  <Sliders className="w-3.5 h-3.5 text-amber-700" />
+                  <span>自定义三轨大步长比例</span>
+                  <span className="text-[10px] text-amber-700/80 font-normal">
+                    (必须满足: 小网 &lt; 中网 &lt; 大网)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResetEdaSteps}
+                  className="inline-flex items-center gap-1 text-[11px] text-amber-800 hover:text-amber-950 font-medium px-2 py-0.5 rounded bg-white border border-amber-300 hover:bg-amber-100/60 transition-colors shadow-2xs"
+                  title="恢复官方默认 5% / 15% / 30%"
+                >
+                  <RotateCcw className="w-3 h-3 text-amber-700" />
+                  <span>恢复默认</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {/* 🟢 小网 */}
+                <div className="bg-white/90 border border-amber-200/80 rounded-lg p-2 shadow-2xs">
+                  <div className="flex items-center justify-between text-[11px] font-medium text-gray-700 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      小网 (高频做T)
+                    </span>
+                    <span className="text-[10px] text-gray-400">下限 1%</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleStepChange("small", -1)}
+                      disabled={Number(edaSteps?.small) <= 1}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="减小 1%"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="flex items-center justify-center flex-1">
+                      <input
+                        type="number"
+                        value={edaSteps?.small ?? 5}
+                        onChange={(e) => handleStepInput("small", e.target.value)}
+                        className="w-12 text-center font-bold text-sm text-gray-900 border border-gray-300 rounded py-0.5 focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
+                        min={1}
+                        max={50}
+                      />
+                      <span className="text-xs text-gray-500 font-semibold ml-1">%</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleStepChange("small", 1)}
+                      disabled={Number(edaSteps?.small) + 1 >= Number(edaSteps?.medium)}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="增加 1%"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 🔵 中网 */}
+                <div className="bg-white/90 border border-amber-200/80 rounded-lg p-2 shadow-2xs">
+                  <div className="flex items-center justify-between text-[11px] font-medium text-gray-700 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      中网 (波段巡航)
+                    </span>
+                    <span className="text-[10px] text-gray-400">主力中坚</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleStepChange("medium", -1)}
+                      disabled={Number(edaSteps?.medium) - 1 <= Number(edaSteps?.small)}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="减小 1%"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="flex items-center justify-center flex-1">
+                      <input
+                        type="number"
+                        value={edaSteps?.medium ?? 15}
+                        onChange={(e) => handleStepInput("medium", e.target.value)}
+                        className="w-12 text-center font-bold text-sm text-gray-900 border border-gray-300 rounded py-0.5 focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
+                        min={1}
+                        max={50}
+                      />
+                      <span className="text-xs text-gray-500 font-semibold ml-1">%</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleStepChange("medium", 1)}
+                      disabled={Number(edaSteps?.medium) + 1 >= Number(edaSteps?.large)}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="增加 1%"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 🟣 大网 */}
+                <div className="bg-white/90 border border-amber-200/80 rounded-lg p-2 shadow-2xs">
+                  <div className="flex items-center justify-between text-[11px] font-medium text-gray-700 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                      大网 (估值防守)
+                    </span>
+                    <span className="text-[10px] text-gray-400">上限 50%</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleStepChange("large", -1)}
+                      disabled={Number(edaSteps?.large) - 1 <= Number(edaSteps?.medium)}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="减小 1%"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="flex items-center justify-center flex-1">
+                      <input
+                        type="number"
+                        value={edaSteps?.large ?? 30}
+                        onChange={(e) => handleStepInput("large", e.target.value)}
+                        className="w-12 text-center font-bold text-sm text-gray-900 border border-gray-300 rounded py-0.5 focus:ring-1 focus:ring-amber-500 focus:border-amber-500"
+                        min={1}
+                        max={50}
+                      />
+                      <span className="text-xs text-gray-500 font-semibold ml-1">%</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleStepChange("large", 1)}
+                      disabled={Number(edaSteps?.large) >= 50}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="增加 1%"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 防呆校验错误警示 */}
+              {edaStepError && (
+                <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 p-2 rounded-lg">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0 text-red-500" />
+                  <span className="font-medium">{edaStepError}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 做 T 收益处理机制 (E大 2.1 留利润) */}

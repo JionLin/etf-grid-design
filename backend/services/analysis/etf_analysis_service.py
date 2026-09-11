@@ -187,7 +187,8 @@ class ETFAnalysisService:
                            analysis_days: int = 180,
                            scaling_ratio: float = 0.0,
                            step_mode: str = 'atr',
-                           benchmark_price: Optional[float] = None) -> Dict:
+                           benchmark_price: Optional[float] = None,
+                           eda_step_ratios: Optional[Dict[str, float]] = None) -> Dict:
         """
         完整的ETF网格交易策略分析
         
@@ -238,11 +239,12 @@ class ETFAnalysisService:
                 scaling_ratio=scaling_ratio,
                 step_mode=step_mode,
                 benchmark_price=benchmark_price,
+                eda_step_ratios=eda_step_ratios,
             )
             
             # 5. 生成策略分析依据
             strategy_rationale = self._generate_strategy_rationale(
-                suitability_result, grid_params, risk_preference
+                suitability_result, grid_params, risk_preference, step_mode=step_mode
             )
             
             # 6. 生成调整建议
@@ -277,6 +279,8 @@ class ETFAnalysisService:
                     'scalingRatio': scaling_ratio,
                     'step_mode': step_mode,
                     'stepMode': step_mode,
+                    'eda_step_ratios': eda_step_ratios,
+                    'edaStepRatios': eda_step_ratios,
                     'benchmark_price': benchmark_price,
                     'benchmarkPrice': benchmark_price,
                 }
@@ -290,7 +294,8 @@ class ETFAnalysisService:
             raise
     
     def _generate_strategy_rationale(self, suitability_result: Dict, 
-                                   grid_params: Dict, risk_preference: str) -> Dict:
+                                   grid_params: Dict, risk_preference: str,
+                                   step_mode: str = 'atr') -> Dict:
         """
         生成策略分析依据
         
@@ -298,6 +303,7 @@ class ETFAnalysisService:
             suitability_result: 适宜度评估结果
             grid_params: 网格参数
             risk_preference: 频率偏好
+            step_mode: 步长生成模式 ('atr' | 'fixed_eda')
             
         Returns:
             策略分析依据
@@ -314,22 +320,36 @@ class ETFAnalysisService:
                 "能够捕捉市场波动模式的变化"
             ]
             
-            # 参数选择逻辑
-            parameter_logic = {
-                'price_range': f"基于ATR比率{atr_analysis['current_atr_pct']:.2f}%和{risk_preference}频率偏好计算",
-                'grid_count': f"基于ATR智能步长算法设定{grid_params['grid_config']['count']}个网格",
-                'fund_allocation': f"底仓比例{grid_params['fund_allocation']['base_position_ratio']:.1%}，"
-                                 f"基于网格需求计算，确保买卖仓位充足",
-                'grid_type': f"{grid_params['grid_config']['type']}网格更适合当前市场特征"
-            }
-            
-            # 收益预测依据
-            profit_basis = {
-                'parameter_optimization': "基于ATR算法和历史波动率分析",
-                'trading_frequency': "根据网格密度和历史波动特征预估",
-                'risk_control': "基于ATR波动率和市场趋势指标设定",
-                'fund_allocation': "智能资金分配确保风险可控"
-            }
+            if step_mode == 'fixed_eda':
+                # E大原版/自定义立体三轨规划逻辑
+                eda_step_pct = grid_params.get('grid_config', {}).get('step_ratio', 0.05) * 100
+                parameter_logic = {
+                    'price_range': f"基于E大立体三轨全域防守规划，上下覆盖极限防守区间 [{grid_params['price_range']['lower']:.3f} ~ {grid_params['price_range']['upper']:.3f}]",
+                    'grid_count': f"复合多轨部署{grid_params['grid_config']['count']}个档位 (小网高频、中网巡航、大网防守)",
+                    'fund_allocation': f"底仓比例{grid_params['fund_allocation']['base_position_ratio']:.1%}，现金采用多轨倒金字塔递增加码",
+                    'grid_type': f"{grid_params['grid_config']['type']}网格适配立体三轨步长"
+                }
+                profit_basis = {
+                    'parameter_optimization': f"基于E大原版价值网格体系（小网{eda_step_pct:.1f}%基础步长，中大网倍数递增防守）",
+                    'trading_frequency': "小网负责日常震荡频繁收割，中大网负责深度回踩接力防守",
+                    'risk_control': "大网步长深潜防守，底仓锁定防踏空，跌满熔断防爆仓",
+                    'fund_allocation': "50%底仓锁定 + 50%多轨资金梯次配置"
+                }
+            else:
+                # ATR算法选择逻辑
+                parameter_logic = {
+                    'price_range': f"基于ATR比率{atr_analysis['current_atr_pct']:.2f}%和{risk_preference}频率偏好计算",
+                    'grid_count': f"基于ATR智能步长算法设定{grid_params['grid_config']['count']}个网格",
+                    'fund_allocation': f"底仓比例{grid_params['fund_allocation']['base_position_ratio']:.1%}，"
+                                     f"基于网格需求计算，确保买卖仓位充足",
+                    'grid_type': f"{grid_params['grid_config']['type']}网格更适合当前市场特征"
+                }
+                profit_basis = {
+                    'parameter_optimization': "基于ATR算法和历史波动率分析",
+                    'trading_frequency': "根据网格密度和历史波动特征预估",
+                    'risk_control': "基于ATR波动率和市场趋势指标设定",
+                    'fund_allocation': "智能资金分配确保风险可控"
+                }
             
             return {
                 'atr_advantages': atr_advantages,
@@ -420,7 +440,8 @@ class ETFAnalysisService:
                                  risk_preference: str, adjustment_coefficient: float = 1.0,
                                  scaling_ratio: float = 0.0,
                                  step_mode: str = 'atr',
-                                 benchmark_price: Optional[float] = None) -> Dict:
+                                 benchmark_price: Optional[float] = None,
+                                 eda_step_ratios: Optional[Dict[str, float]] = None) -> Dict:
         """
         计算网格策略参数（使用算法模块）
         
@@ -443,71 +464,120 @@ class ETFAnalysisService:
             # 若用户指定了自定义基准价格且大于0，则使用自定义基准价格作为中心锚点 P0
             anchor_price = float(benchmark_price) if (benchmark_price is not None and float(benchmark_price) > 0) else current_price
             
-            # 1. 计算价格区间（基于ATR、频率偏好和调节系数，以 anchor_price 为中心）
-            price_lower, price_upper = self.atr_analyzer.calculate_price_range(
-                anchor_price, atr_ratio, risk_preference, adjustment_coefficient
-            )
-            
-            # 2. 基于ATR计算最优步长
-            step_size, step_ratio = self.grid_optimizer.calculate_optimal_step_size(
-                atr_ratio, anchor_price, risk_preference, adjustment_coefficient
-            )
-            
-            
-            if grid_type == '等差':
-                # 3. 基于步长计算网格数量
-                grid_count = self.arithmetic_calculator.calculate_grid_count_from_step(
-                    price_lower, price_upper, step_size, anchor_price
-                )
-                # 4. 计算价格水平
-                price_levels = self.arithmetic_calculator.calculate_grid_levels(
-                    price_lower, price_upper, step_size, anchor_price
-                )
-            else:  # 等比网格
-                # 3. 基于步长计算网格数量
-                grid_count = self.geometric_calculator.calculate_grid_count_from_step(
-                    price_lower, price_upper, step_size, anchor_price
-                )
-                # 4. 计算价格水平
-                price_levels = self.geometric_calculator.calculate_grid_levels(
-                    price_lower, price_upper, step_size, anchor_price
-                )
-            
-            # 5. 使用新的资金分配算法（以 anchor_price 测算）
-            fund_allocation = self.grid_optimizer.calculate_fund_allocation_v2(
-                total_capital, price_levels, anchor_price
-            )
-            
-            # 7. 计算价格区间比例
-            price_range_ratio = (price_upper - price_lower) / anchor_price
-            
-            # 8. ATR评分
-            atr_score, atr_description = self.atr_analyzer.get_atr_score(atr_ratio)
-
-            # 9. 计算大中小三层复合网格 (以 anchor_price 为中心铺设)
+            # 1. 先行计算大中小三层复合网格阶梯 (以 anchor_price 为中心铺设，尊重 step_mode 与自定义比例)
             composite_steps = self.grid_optimizer.calculate_composite_steps(
-                anchor_price, atr_ratio, adjustment_coefficient, step_mode=step_mode
+                anchor_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
+                eda_step_ratios=eda_step_ratios
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, anchor_price, composite_steps, base_position_ratio=0.5,
                 scaling_ratio=scaling_ratio
             )
+
+            # 2. 收集复合多轨所有买入档位与卖出档位
+            all_buy_levels = []
+            all_sell_levels = []
+            for rail_data in composite_grid.get('rails', {}).values():
+                all_buy_levels.extend(rail_data.get('buy_levels', []))
+                all_sell_levels.extend(rail_data.get('sell_levels', []))
+
+            # 3. 价格区间完全基于真实复合阶梯极值统一派生 (方案一)
+            if all_buy_levels:
+                derived_lower = min(item['price'] for item in all_buy_levels)
+            else:
+                derived_lower = round(anchor_price * 0.85, 3)
+
+            if all_sell_levels:
+                derived_upper = max(item['price'] for item in all_sell_levels)
+            else:
+                derived_upper = round(anchor_price * 1.15, 3)
+
+            derived_ratio = (derived_upper - derived_lower) / anchor_price
+
+            # 4. 看板核心步长与小网 (高频做T) 实际步长动态对齐
+            small_step = composite_steps.get('small', {})
+            active_step_ratio = float(small_step.get('step_ratio') or (0.05 if step_mode == 'fixed_eda' else 0.02))
+            active_step_size = float(small_step.get('step_size') or round(anchor_price * active_step_ratio, 3))
+            total_levels_count = len(all_buy_levels) + len(all_sell_levels)
+
+            # 5. 从 composite_grid 真实底层对象中提取量化资金账本
+            base_info = composite_grid.get('base_position', {})
+            base_actual = float(base_info.get('actual_capital', round(total_capital * 0.5, 2)))
+            base_ratio = float(base_info.get('ratio', 0.5))
+            liquid_capital = float(composite_grid.get('liquid_capital', round(total_capital * 0.5, 2)))
+
+            total_buy_grid_fund = sum(item['amount'] for item in all_buy_levels)
+            grid_fund_utilization_rate = round(total_buy_grid_fund / liquid_capital, 4) if liquid_capital > 0 else 1.0
+            reserve_amount = max(0.0, round(total_capital - base_actual - total_buy_grid_fund, 2))
+            reserve_ratio = round(reserve_amount / total_capital, 4) if total_capital > 0 else 0.0
+
+            # 提取小网第 1 档的真实交易股数与单笔预期收益
+            small_buy_levels = composite_grid.get('rails', {}).get('small', {}).get('buy_levels', [])
+            single_trade_quantity = int(small_buy_levels[0]['shares']) if small_buy_levels else 100
+            expected_profit_per_trade = float(small_buy_levels[0]['est_profit']) if small_buy_levels else 0.0
+
+            fund_allocation = {
+                'total_capital': total_capital,
+                'base_position_ratio': base_ratio,
+                'base_position_amount': base_actual,
+                'grid_trading_amount': liquid_capital,
+                'grid_funds_amount': liquid_capital,
+                'grid_funds_ratio': round(liquid_capital / total_capital, 4) if total_capital > 0 else 0.5,
+                'buy_funds_amount': round(total_buy_grid_fund, 2),
+                'total_buy_grid_fund': round(total_buy_grid_fund, 2),
+                'sell_funds_amount': base_actual,
+                'reserve_amount': reserve_amount,
+                'reserve_funds_amount': reserve_amount,
+                'reserve_funds_ratio': reserve_ratio,
+                'grid_fund_utilization_rate': grid_fund_utilization_rate,
+                'single_trade_quantity': single_trade_quantity,
+                'expected_profit_per_trade': round(expected_profit_per_trade, 2),
+                'single_grid_amount': round(total_buy_grid_fund / max(len(all_buy_levels), 1), 2),
+                'safety_buffer_ratio': reserve_ratio,
+                'allocation_mode': '复合多轨阶梯资金分配' if step_mode == 'fixed_eda' else 'ATR智能资金分配'
+            }
+
+            # 6. 单层价格线兼顾兜底兼容
+            price_levels = sorted([item['price'] for item in all_buy_levels + all_sell_levels] + [anchor_price])
+
+            # 7. ATR评分
+            atr_score, atr_description = self.atr_analyzer.get_atr_score(atr_ratio)
             
+            is_eda = (step_mode == 'fixed_eda')
+            calculation_method = 'E大原版三轨规划' if is_eda else 'ATR智能算法'
+            if is_eda:
+                calculation_logic = {
+                    'step1': f'步长模式: E大原版/自定义立体三轨 (小网{active_step_ratio:.1%})',
+                    'step2': f'小网核心做T步长: {active_step_size:.3f} ({active_step_ratio:.1%})',
+                    'step3': f'复合三轨档位总数: {total_levels_count}个 (买{len(all_buy_levels)}+卖{len(all_sell_levels)})',
+                    'step4': f'立体防守价格区间: [{derived_lower:.3f}, {derived_upper:.3f}]',
+                    'step5': f'区间跨度覆盖率: {derived_ratio:.1%}'
+                }
+            else:
+                calculation_logic = {
+                    'step1': f'ATR比率: {atr_ratio:.1%}',
+                    'step2': f'基于ATR和频率偏好计算小网步长: {active_step_size:.3f} ({active_step_ratio:.1%})',
+                    'step3': f'复合三轨档位总数: {total_levels_count}个 (买{len(all_buy_levels)}+卖{len(all_sell_levels)})',
+                    'step4': f'自适应动态价格区间: [{derived_lower:.3f}, {derived_upper:.3f}]',
+                    'step5': f'区间跨度覆盖率: {derived_ratio:.1%}'
+                }
+
             result = {
                 'current_price': current_price,
                 'benchmark_price': anchor_price,
                 'is_custom_benchmark': round(anchor_price, 4) != round(current_price, 4),
                 'price_date': latest_price_info.get('timestamp', ''),  # 价格数据更新时间
+                'step_mode': step_mode,
                 'price_range': {
-                    'lower': round(price_lower, 3),
-                    'upper': round(price_upper, 3),
-                    'ratio': round(price_range_ratio, 4)
+                    'lower': round(derived_lower, 3),
+                    'upper': round(derived_upper, 3),
+                    'ratio': round(derived_ratio, 4)
                 },
                 'grid_config': {
-                    'count': grid_count,
+                    'count': total_levels_count,
                     'type': grid_type,
-                    'step_size': round(step_size, 3),
-                    'step_ratio': round(step_ratio, 4)
+                    'step_size': round(active_step_size, 3),
+                    'step_ratio': round(active_step_ratio, 4)
                 },
                 'price_levels': [round(p, 3) for p in price_levels],
                 'fund_allocation': fund_allocation,
@@ -516,18 +586,12 @@ class ETFAnalysisService:
                 'atr_based': True,
                 'atr_score': atr_score,
                 'atr_description': atr_description,
-                'calculation_method': 'ATR智能算法',
-                'calculation_logic': {
-                    'step1': f'ATR比率: {atr_ratio:.1%}',
-                    'step2': f'基于ATR和频率偏好计算最优步长: {step_size:.3f} ({step_ratio:.1%})',
-                    'step3': f'基于步长计算网格数量: {grid_count}个',
-                    'step4': f'调整价格区间: [{price_lower:.3f}, {price_upper:.3f}]',
-                    'step5': f'生成{len(price_levels)}个价格水平'
-                }
+                'calculation_method': calculation_method,
+                'calculation_logic': calculation_logic
             }
             
-            logger.info(f"ATR智能网格策略计算完成: ATR步长{step_size:.3f}({step_ratio:.1%}), "
-                       f"{grid_count}个{grid_type}网格, 区间[{price_lower:.3f}, {price_upper:.3f}]")
+            logger.info(f"{calculation_method}网格策略计算完成: 核心步长{active_step_size:.3f}({active_step_ratio:.1%}), "
+                       f"{total_levels_count}个档位, 真实区间[{derived_lower:.3f}, {derived_upper:.3f}]")
             
             return result
             
@@ -544,6 +608,7 @@ class ETFAnalysisService:
         scaling_ratio: float = 0.0,
         reinvest_mode: str = 'cash',
         step_mode: str = 'atr',
+        eda_step_ratios: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         """
         运行策略历史回测
@@ -572,7 +637,8 @@ class ETFAnalysisService:
             atr_ratio = atr_analysis['current_atr_ratio']
 
             composite_steps = self.grid_optimizer.calculate_composite_steps(
-                current_price, atr_ratio, adjustment_coefficient, step_mode=step_mode
+                current_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
+                eda_step_ratios=eda_step_ratios
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, current_price, composite_steps, base_position_ratio=0.5,

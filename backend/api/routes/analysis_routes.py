@@ -92,10 +92,43 @@ def analyze_etf_strategy():
                 benchmark_price = None
         except (ValueError, TypeError):
             benchmark_price = None
+
+        # 获取 E大原版自定义各轨步长比例 (可选参数)
+        eda_step_ratios = None
+        raw_eda = data.get('edaStepRatios', data.get('eda_step_ratios', data.get('edaSteps', data.get('eda_steps'))))
+        if raw_eda and step_mode == 'fixed_eda':
+            ratios = {}
+            if isinstance(raw_eda, str):
+                parts = [p.strip() for p in raw_eda.split(',') if p.strip()]
+                if len(parts) == 3:
+                    try:
+                        vals = [float(p) for p in parts]
+                        v_small = vals[0] / 100.0 if vals[0] >= 1.0 else vals[0]
+                        v_medium = vals[1] / 100.0 if vals[1] >= 1.0 else vals[1]
+                        v_large = vals[2] / 100.0 if vals[2] >= 1.0 else vals[2]
+                        ratios = {'small': v_small, 'medium': v_medium, 'large': v_large}
+                    except (ValueError, TypeError):
+                        pass
+            elif isinstance(raw_eda, dict):
+                for rail in ['small', 'medium', 'large']:
+                    if rail in raw_eda and raw_eda[rail] is not None:
+                        try:
+                            val = float(raw_eda[rail])
+                            ratios[rail] = val / 100.0 if val >= 1.0 else val
+                        except (ValueError, TypeError):
+                            pass
+            if len(ratios) == 3:
+                s, m, l = ratios['small'], ratios['medium'], ratios['large']
+                if 0.005 <= s < m < l <= 0.55:
+                    eda_step_ratios = {
+                        'small': round(s, 4),
+                        'medium': round(m, 4),
+                        'large': round(l, 4),
+                    }
         
         from flask import current_app
         current_app.logger.info(f"开始分析ETF策略: {etf_code}, 资金{total_capital}, "
-                   f"{grid_type}网格, {risk_preference}, 加码{scaling_ratio}, 步长模式{step_mode}, 基准价{benchmark_price}, 周期{analysis_days}天")
+                   f"{grid_type}网格, {risk_preference}, 加码{scaling_ratio}, 步长模式{step_mode}, 基准价{benchmark_price}, 自定义步长{eda_step_ratios}, 周期{analysis_days}天")
         
         # 执行分析
         analysis_result = etf_service.analyze_etf_strategy(
@@ -108,6 +141,7 @@ def analyze_etf_strategy():
             scaling_ratio=scaling_ratio,
             step_mode=step_mode,
             benchmark_price=benchmark_price,
+            eda_step_ratios=eda_step_ratios,
         )
         
         current_app.logger.info(f"ETF策略分析完成: {etf_code}, "
@@ -152,6 +186,39 @@ def run_backtest():
         if step_mode not in ['atr', 'fixed_eda']:
             step_mode = 'atr'
 
+        # 获取 E大原版自定义各轨步长比例 (可选参数)
+        eda_step_ratios = None
+        raw_eda = data.get('edaStepRatios', data.get('eda_step_ratios', data.get('edaSteps', data.get('eda_steps'))))
+        if raw_eda and step_mode == 'fixed_eda':
+            ratios = {}
+            if isinstance(raw_eda, str):
+                parts = [p.strip() for p in raw_eda.split(',') if p.strip()]
+                if len(parts) == 3:
+                    try:
+                        vals = [float(p) for p in parts]
+                        v_small = vals[0] / 100.0 if vals[0] >= 1.0 else vals[0]
+                        v_medium = vals[1] / 100.0 if vals[1] >= 1.0 else vals[1]
+                        v_large = vals[2] / 100.0 if vals[2] >= 1.0 else vals[2]
+                        ratios = {'small': v_small, 'medium': v_medium, 'large': v_large}
+                    except (ValueError, TypeError):
+                        pass
+            elif isinstance(raw_eda, dict):
+                for rail in ['small', 'medium', 'large']:
+                    if rail in raw_eda and raw_eda[rail] is not None:
+                        try:
+                            val = float(raw_eda[rail])
+                            ratios[rail] = val / 100.0 if val >= 1.0 else val
+                        except (ValueError, TypeError):
+                            pass
+            if len(ratios) == 3:
+                s, m, l = ratios['small'], ratios['medium'], ratios['large']
+                if 0.005 <= s < m < l <= 0.55:
+                    eda_step_ratios = {
+                        'small': round(s, 4),
+                        'medium': round(m, 4),
+                        'large': round(l, 4),
+                    }
+
         result = etf_service.run_strategy_backtest(
             etf_code=etf_code,
             total_capital=total_capital,
@@ -160,6 +227,7 @@ def run_backtest():
             scaling_ratio=scaling_ratio,
             reinvest_mode=reinvest_mode,
             step_mode=step_mode,
+            eda_step_ratios=eda_step_ratios,
         )
 
         return jsonify({'success': True, 'data': result})

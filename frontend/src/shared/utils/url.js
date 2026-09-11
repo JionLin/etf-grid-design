@@ -40,6 +40,7 @@ export const DEFAULT_PARAMS = {
   days: "180", // 历史分析周期：90 | 180 | 365
   scaling: "0.0", // 逐格加码比例：0.0 ~ 0.20
   reinvest: "pool_shares", // 做T收益留存模式：'pool_shares' | 'cash'
+  edaSteps: "5,15,30", // E大原版自定义各轨步长比例：默认 5,15,30
 };
 
 /**
@@ -78,6 +79,18 @@ export const encodeAnalysisParams = (params) => {
   // 步长生成模式 (ATR动态自适应 vs E大原版5%/15%/30%)
   if (params.stepMode) {
     searchParams.set("stepMode", params.stepMode);
+  }
+
+  // E大原版自定义各轨步长比例 (仅当为 fixed_eda 且非默认 5,15,30 时记录)
+  if (params.stepMode === "fixed_eda" && params.edaSteps) {
+    const s = params.edaSteps.small;
+    const m = params.edaSteps.medium;
+    const l = params.edaSteps.large;
+    if (s !== undefined && m !== undefined && l !== undefined) {
+      if (!(Number(s) === 5 && Number(m) === 15 && Number(l) === 30)) {
+        searchParams.set("eda_steps", `${s},${m},${l}`);
+      }
+    }
   }
 
   // 历史分析周期
@@ -148,6 +161,18 @@ export const decodeAnalysisParams = (searchParams) => {
   const stepMode = searchParams.get("stepMode") || searchParams.get("step_mode");
   if (stepMode && ["atr", "fixed_eda"].includes(stepMode)) {
     params.stepMode = stepMode;
+  }
+
+  // 解析 E大原版自定义各轨步长比例
+  const edaStepsRaw = searchParams.get("eda_steps") || searchParams.get("edaSteps");
+  if (edaStepsRaw) {
+    const parts = edaStepsRaw.split(",").map((p) => parseInt(p.trim(), 10));
+    if (parts.length === 3 && parts.every((n) => !isNaN(n))) {
+      const [s, m, l] = parts;
+      if (s >= 1 && s < m && m < l && l <= 50) {
+        params.edaSteps = { small: s, medium: m, large: l };
+      }
+    }
   }
 
   // 解析历史分析周期
@@ -245,6 +270,22 @@ export const validateAndCompleteParams = (params) => {
     result.params.stepMode = DEFAULT_PARAMS.stepMode;
   } else {
     result.params.stepMode = params.stepMode;
+  }
+
+  // 验证并补全 E大原版自定义步长
+  if (result.params.stepMode === "fixed_eda") {
+    if (params.edaSteps) {
+      const s = parseInt(params.edaSteps.small, 10);
+      const m = parseInt(params.edaSteps.medium, 10);
+      const l = parseInt(params.edaSteps.large, 10);
+      if (!isNaN(s) && !isNaN(m) && !isNaN(l) && s >= 1 && s < m && m < l && l <= 50) {
+        result.params.edaSteps = { small: s, medium: m, large: l };
+      } else {
+        result.params.edaSteps = { small: 5, medium: 15, large: 30 };
+      }
+    } else {
+      result.params.edaSteps = { small: 5, medium: 15, large: 30 };
+    }
   }
 
   // 验证并补全历史分析周期

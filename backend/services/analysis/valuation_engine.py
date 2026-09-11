@@ -6,6 +6,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 from backend.services.data.cache_service import EnhancedCache
 from backend.services.data.csindex_client import CsindexClient
+from backend.services.data.tencent_client import TencentFinanceClient
 
 logger = logging.getLogger(__name__)
 
@@ -27,16 +28,23 @@ class ValuationEngine:
          "desc": "泡沫阶段，极易形成长期套牢山顶", "advice": "【高危预警】当前标的处于历史极端泡沫高估值区间！极易遭受长期下挫与深套风险，建议底仓降至 25% 以下或暂缓建仓！"}
     ]
 
-    def __init__(self, cache: Optional[EnhancedCache] = None, csindex_client: Optional[CsindexClient] = None):
+    def __init__(
+        self,
+        cache: Optional[EnhancedCache] = None,
+        csindex_client: Optional[CsindexClient] = None,
+        tencent_client: Optional[TencentFinanceClient] = None
+    ):
         """
-        初始化估值计算引擎
+        初始化估值计算引擎 (支持腾讯与中证双在线级联)
         
         Args:
             cache: 增强缓存管理器
             csindex_client: 中证指数官方客户端
+            tencent_client: 腾讯财经行情客户端
         """
         self.cache = cache or EnhancedCache()
         self.client = csindex_client or CsindexClient()
+        self.tencent_client = tencent_client or TencentFinanceClient()
 
     @staticmethod
     def calculate_ecdf_percentile(current_val: float, history_series: List[float]) -> float:
@@ -111,24 +119,38 @@ class ValuationEngine:
         """
         # 1. 尝试从缓存或底表提取基准信息
         baseline_info = self.cache.get_valuation_with_fallback(etf_code)
-        idx_code = baseline_info.get("index_code", etf_code)
+        idx_code = baseline_info.get("index_code")
+        source = baseline_info.get("source")
 
-        # 2. 尝试从中证指数官方源获取最新快照
-        latest_official = self.client.get_index_valuation(idx_code)
+        # 2. 三级级联获取最新快照 (优先腾讯极速源 -> 备用中证REST -> 兜底离线底表)
+        latest_online = None
+        if idx_code and source != "unknown":
+            # 2.1 首选通道：腾讯财经行情接口 (极速, 毫秒级)
+            latest_online = self.tencent_client.get_index_valuation(idx_code)
+            
+            # 2.2 备用通道：中证官网生产 REST 接口 (全覆盖 93 序列或腾讯未命中时)
+            if not latest_online:
+                latest_online = self.client.get_index_valuation(idx_code)
         
-        # 3. 确定最终使用的 PE/PB/股息率与更新日期
-        if latest_official:
-            current_pe = custom_pe if custom_pe is not None else latest_official.get("pe_ttm", baseline_info.get("pe_ttm", 0.0))
-            dividend_yield = latest_official.get("dividend_yield", baseline_info.get("dividend_yield", 0.0))
-            trade_date = latest_official.get("trade_date", "")
-            data_source = "csindex_official"
+        # 3. 确定最终使用的 PE/PB/股息率与更新日期 (兼容底表 pe_ttm 与缓存 current_pe)
+        raw_pe = baseline_info.get("pe_ttm") if baseline_info.get("pe_ttm") is not None else baseline_info.get("current_pe", 0.0)
+        raw_pb = baseline_info.get("pb") if baseline_info.get("pb") is not None else baseline_info.get("current_pb", 0.0)
+        fallback_pe = float(raw_pe if raw_pe is not None else 0.0)
+        fallback_pb = float(raw_pb if raw_pb is not None else 0.0)
+        fallback_div = float(baseline_info.get("dividend_yield", 0.0) or 0.0)
+
+        if latest_online:
+            current_pe = float(custom_pe if custom_pe is not None else latest_online.get("pe_ttm", fallback_pe))
+            dividend_yield = float(latest_online.get("dividend_yield", fallback_div))
+            trade_date = str(latest_online.get("trade_date", ""))
+            data_source = str(latest_online.get("source", "online_realtime"))
             is_fallback = False
         else:
-            current_pe = custom_pe if custom_pe is not None else baseline_info.get("pe_ttm", 0.0)
-            dividend_yield = baseline_info.get("dividend_yield", 0.0)
-            trade_date = baseline_info.get("trade_date", "2025-05-15")
-            data_source = baseline_info.get("source", "baseline_offline")
-            is_fallback = baseline_info.get("is_fallback", True)
+            current_pe = float(custom_pe if custom_pe is not None else fallback_pe)
+            dividend_yield = fallback_div
+            trade_date = str(baseline_info.get("trade_date", "2025-05-15")) if source != "unknown" else ""
+            data_source = str(baseline_info.get("source", "baseline_offline"))
+            is_fallback = bool(baseline_info.get("is_fallback", True))
 
         # 4. 计算或提取历史百分位
         # 如果底表包含 summary，可基于历史插值计算，或直接取基准分位
@@ -162,12 +184,12 @@ class ValuationEngine:
 
         result = {
             "etf_code": etf_code,
-            "index_code": idx_code,
-            "index_name": baseline_info.get("name", "相关标的指数"),
+            "index_code": idx_code or etf_code,
+            "index_name": baseline_info.get("name") or baseline_info.get("index_name", "相关标的指数"),
             "metric": baseline_info.get("metric", "pe"),
             "current_pe": round(float(current_pe), 2),
             "pe_percentile": pe_percentile,
-            "current_pb": round(float(baseline_info.get("pb", 0.0)), 2),
+            "current_pb": round(float(baseline_info.get("pb") or baseline_info.get("current_pb", 0.0)), 2),
             "pb_percentile": baseline_info.get("pb_percentile", 50.0),
             "dividend_yield": round(float(dividend_yield), 2),
             "temperature": tier_info["temperature"],

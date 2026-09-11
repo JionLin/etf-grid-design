@@ -25,6 +25,8 @@ const BacktestCard = ({
   reinvestMode = "pool_shares",
   scalingRatio = 0.0,
   stepMode = "atr",
+  edaStepRatios = null,
+  edaSteps = null,
 }) => {
   const safeTotalCapital = Number(totalCapital || 30000);
   const [backtestDays, setBacktestDays] = useState(initialDays);
@@ -46,6 +48,8 @@ const BacktestCard = ({
         reinvestMode,
         scalingRatio,
         stepMode,
+        edaStepRatios,
+        edaSteps,
       });
       if (res?.success && res.data) {
         setBacktestData(res.data);
@@ -63,7 +67,7 @@ const BacktestCard = ({
     if (etfCode) {
       fetchBacktest(backtestDays);
     }
-  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode]);
+  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps]);
 
   const summary = backtestData?.summary;
   const profitPool = backtestData?.profit_pool || summary?.profit_pool;
@@ -163,7 +167,13 @@ const BacktestCard = ({
               )}
               {stepMode === "fixed_eda" ? (
                 <span className="text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-mono">
-                  🏛️ E大原版步长 (5%/15%/30%)
+                  🏛️ E大原版步长 ({
+                    edaStepRatios
+                      ? `${Math.round(edaStepRatios.small * 100)}%/${Math.round(edaStepRatios.medium * 100)}%/${Math.round(edaStepRatios.large * 100)}%`
+                      : edaSteps
+                      ? `${edaSteps.small}%/${edaSteps.medium}%/${edaSteps.large}%`
+                      : "5%/15%/30%"
+                  })
                 </span>
               ) : (
                 <span className="text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-mono">

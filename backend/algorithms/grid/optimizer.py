@@ -4,7 +4,7 @@
 """
 
 import numpy as np
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Tuple, Any, Optional
 import logging
 from .arithmetic_grid import ArithmeticGridCalculator
 from .geometric_grid import GeometricGridCalculator
@@ -75,9 +75,10 @@ class GridOptimizer:
             default_step_ratio = 0.01
             return current_price * default_step_ratio, default_step_ratio
 
-    def calculate_composite_steps(self, current_price: float, atr_ratio: float,
+    def calculate_composite_steps(self, current_price: float, atr_ratio: float, 
                                   adjustment_coefficient: float = 1.0,
-                                  step_mode: str = 'atr') -> Dict[str, Dict[str, Any]]:
+                                  step_mode: str = 'atr',
+                                  eda_step_ratios: Optional[Dict[str, float]] = None) -> Dict[str, Dict[str, Any]]:
         """
         计算大中小三层复合网格的自适应步长与资金配置
 
@@ -86,6 +87,7 @@ class GridOptimizer:
             atr_ratio: ATR比率
             adjustment_coefficient: 调节系数
             step_mode: 步长模式 ('atr' 默认ATR自适应 | 'fixed_eda' E大原版固定大步长 5%/15%/30%)
+            eda_step_ratios: E大原版模式下的自定义各轨步长比例 (字典: {'small': float, 'medium': float, 'large': float})
 
         Returns:
             Dict包含 small, medium, large 的步长、资金比例与档位数
@@ -124,6 +126,15 @@ class GridOptimizer:
                 'medium': 0.15,
                 'large': 0.30,
             }
+            if eda_step_ratios and isinstance(eda_step_ratios, dict):
+                for rail_key in ['small', 'medium', 'large']:
+                    if rail_key in eda_step_ratios and eda_step_ratios[rail_key] is not None:
+                        try:
+                            val = float(eda_step_ratios[rail_key])
+                            if 0.002 <= val <= 0.50:
+                                eda_fixed_ratios[rail_key] = val
+                        except (ValueError, TypeError):
+                            pass
 
             result = {}
             for rail, conf in config_template.items():
@@ -134,8 +145,8 @@ class GridOptimizer:
                     multiplier = conf['base_multiplier'] * adjustment_coefficient
                     step_ratio = atr_ratio * multiplier
 
-                # 约束合理范围 (0.2% - 35%，放宽上限以容纳原版 30% 大网)
-                step_ratio = max(0.002, min(0.35, step_ratio))
+                # 约束合理范围 (0.2% - 50%，放宽上限以容纳自定义高达 50% 的大网)
+                step_ratio = max(0.002, min(0.50, step_ratio))
                 step_size = step_ratio * current_price
 
                 result[rail] = {
@@ -153,6 +164,9 @@ class GridOptimizer:
         except Exception as e:
             logger.error(f"复合网格步长计算失败: {str(e)}")
             return {}
+
+    # 别名兼容
+    calculate_composite_grid_steps = calculate_composite_steps
     
     def calculate_base_position_ratio(self, atr_ratio: float, risk_preference: str, 
                                     adx_value: float, volatility: float) -> float:

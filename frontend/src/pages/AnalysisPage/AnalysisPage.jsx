@@ -277,7 +277,7 @@ const AnalysisPage = () => {
                     步长模式：
                     {currentParams?.stepMode === "fixed_eda" ? (
                       <span className="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 font-mono text-xs">
-                        🏛️ E大原版(5%/15%/30%)
+                        🏛️ E大原版({currentParams?.edaSteps?.small || 5}%/{currentParams?.edaSteps?.medium || 15}%/{currentParams?.edaSteps?.large || 30}%)
                       </span>
                     ) : (
                       <span className="text-indigo-700 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 font-mono text-xs">

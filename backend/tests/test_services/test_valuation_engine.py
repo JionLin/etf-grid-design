@@ -3,6 +3,7 @@
 """
 import pytest
 from unittest.mock import MagicMock
+from backend.services.data.cache_service import EnhancedCache
 from backend.services.analysis.valuation_engine import ValuationEngine
 
 def test_calculate_ecdf_percentile():
@@ -71,3 +72,86 @@ def test_evaluate_valuation_with_fallback():
     res_gold = engine.evaluate_valuation("518880")
     assert res_gold["is_fatal_flaw"] is True
     assert res_gold["tier"] == "沸点高估"
+
+def test_evaluate_valuation_mainstream_expanded_etfs():
+    """验证扩充的主流行业 ETF（如华宝医疗 512170、新能源车 515030、光伏 515790、军工 512660）正常解析"""
+    engine = ValuationEngine()
+    engine.client.get_index_valuation = MagicMock(return_value=None)
+    
+    # 512170 华宝医疗 ETF
+    res_med = engine.evaluate_valuation("512170")
+    assert res_med["index_code"] == "399989"
+    assert res_med["index_name"] == "中证医疗"
+    assert res_med["current_pe"] > 0
+    assert res_med["current_pb"] > 0
+    assert res_med["pe_percentile"] > 0
+    
+    # 515030 新能源车 ETF
+    res_ev = engine.evaluate_valuation("515030")
+    assert res_ev["index_code"] == "399976"
+    assert res_ev["index_name"] == "CS新能车"
+    assert res_ev["current_pe"] > 0
+    assert res_ev["current_pb"] > 0
+
+    # 515790 光伏 ETF
+    res_pv = engine.evaluate_valuation("515790")
+    assert res_pv["index_code"] == "931151"
+    assert res_pv["index_name"] == "光伏产业"
+    assert res_pv["current_pe"] > 0
+
+    # 512660 军工 ETF
+    res_mil = engine.evaluate_valuation("512660")
+    assert res_mil["index_code"] == "399959"
+    assert res_mil["index_name"] == "中证军工"
+    assert res_mil["current_pe"] > 0
+
+def test_evaluate_valuation_cascade_sources(tmp_path):
+    """验证三级级联获取逻辑：腾讯首选 -> 中证备用 -> 离线兜底"""
+    temp_cache = EnhancedCache(cache_dir=str(tmp_path / "cache_1"))
+    engine = ValuationEngine(cache=temp_cache)
+    
+    # 场景 1: 腾讯源正常命中
+    engine.tencent_client.get_index_valuation = MagicMock(return_value={
+        "trade_date": "2026-09-11",
+        "index_code": "399989",
+        "pe_ttm": 29.07,
+        "source": "tencent_realtime"
+    })
+    engine.client.get_index_valuation = MagicMock(return_value=None)
+    
+    res1 = engine.evaluate_valuation("512170")
+    assert res1["source"] == "tencent_realtime"
+    assert res1["current_pe"] == 29.07
+    assert res1["trade_date"] == "2026-09-11"
+    assert res1["current_pb"] == 3.05  # 融合底表 PB
+    assert res1["is_fallback"] is False
+    
+    # 场景 2: 腾讯未命中，平滑降级中证 REST
+    temp_cache2 = EnhancedCache(cache_dir=str(tmp_path / "cache_2"))
+    engine2 = ValuationEngine(cache=temp_cache2)
+    engine2.tencent_client.get_index_valuation = MagicMock(return_value=None)
+    engine2.client.get_index_valuation = MagicMock(return_value={
+        "trade_date": "2026-09-11",
+        "index_code": "931151",
+        "pe_ttm": 29.69,
+        "source": "csindex_official_rest"
+    })
+    
+    res2 = engine2.evaluate_valuation("515790")
+    assert res2["source"] == "csindex_official_rest"
+    assert res2["current_pe"] == 29.69
+    assert res2["trade_date"] == "2026-09-11"
+    assert res2["current_pb"] == 2.1  # 融合底表 PB
+    assert res2["is_fallback"] is False
+    
+    # 场景 3: 两路均失败，平滑降级离线底表
+    temp_cache3 = EnhancedCache(cache_dir=str(tmp_path / "cache_3"))
+    engine3 = ValuationEngine(cache=temp_cache3)
+    engine3.tencent_client.get_index_valuation = MagicMock(return_value=None)
+    engine3.client.get_index_valuation = MagicMock(return_value=None)
+    
+    res3 = engine3.evaluate_valuation("512660")
+    assert res3["source"] == "baseline_offline"
+    assert res3["is_fallback"] is True
+    assert res3["current_pe"] > 0
+    assert res3["current_pb"] > 0

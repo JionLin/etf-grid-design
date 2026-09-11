@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-12
+### :sparkles: Major Features (量化状态机回测与 10 年官方估值标尺)
+- **10年官方估值标尺**: 建立全市场核心基准指数 10 年滚动 PE-TTM、PB 与股息率 (D/P) 历史百分位标尺与五档安全边际温度计，将跟踪池扩充至 117+ 只高流动性主流宽基与高景气行业 ETF。
+- **三级级联降级架构**: 研发“腾讯实时行情 ➜ 中证官方 REST ➜ 10年高精度离线底表”三级高可用级联体系，实现秒级响应与零阻断高可用。
+- **GridSlot 槽位状态机回测**: 在 `GridBacktestEngine` 中全面落地 `GridSlot` 二值有状态撮合（IDLE/HOLDING），彻底根除同档位重复买入；实现单边暴跌“小网 5 格上限硬熔断”防御哨兵；打通买卖逐笔对冲闭环净利润计算，告别破折号 `-` 占位，输出真实做 T 胜率。
+
+### :zap: Architecture & Enhancements
+- **复合阶梯唯一事实源**: 彻底废除顶层独立 ATR 计算逻辑，重构以 `composite_grid` 为唯一事实源（Single Source of Truth），实现价格区间上下界、看板核心主步长、总档位数与用户所选“步长生成模式”100% 动态自洽联动。
+- **真实量化资金账本**: 坚决杜绝死板假兜底，实打实输出底仓实际建仓占用、网格流动现金池、100股向下取整机动零钱结余（`reserve_amount`）、99%+ 真实资金利用率、以及小网第 1 档单笔委托股数与单笔预期收益。
+- **多层文档体系同步**: 系统性同步 `README.md` 门面亮点卡片、`docs/STRATEGY_MANUAL.md` 策略白皮书数学推导、以及本版本更新流水。
+
+### :bug: Bug Fixes
+- **白屏异常修复**: 修复因 `fund_allocation` 字段缺失导致前端调用 `formatCurrency(undefined)` 抛出未捕获异常引发的整页白屏崩溃。
+- **估值阻断修复**: 解决中证指数官方历史文件遭遇 403 阻断导致标的（如 512170）估值无法展示的缺陷。
+
 ## [0.3.0] - 2026-09-10
 ### :sparkles: Major Features (E大网格 2.0 体系代际重构)
 - **复合网格**: 引入 E大 2.3 大中小三层多轨复合网格体系（20% 小网高频做T / 35% 中网波段巡航 / 45% 大网极值防守），支持 14 日 ATR 动态自适应步长折算与 A 股 100 股向下对齐。

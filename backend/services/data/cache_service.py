@@ -276,9 +276,16 @@ class EnhancedCache:
         mapping = baseline.get('etf_mapping', {})
         indices = baseline.get('indices', {})
 
-        idx_code = mapping.get(etf_code, etf_code)
-        if idx_code in indices:
+        idx_code = mapping.get(etf_code)
+        if idx_code and idx_code in indices:
             idx_info = dict(indices[idx_code])
+            idx_info['is_fallback'] = True
+            idx_info['source'] = 'baseline_offline'
+            idx_info['etf_code'] = etf_code
+            return idx_info
+
+        if etf_code in indices:
+            idx_info = dict(indices[etf_code])
             idx_info['is_fallback'] = True
             idx_info['source'] = 'baseline_offline'
             idx_info['etf_code'] = etf_code
@@ -286,7 +293,7 @@ class EnhancedCache:
 
         return {
             'etf_code': etf_code,
-            'index_code': idx_code,
+            'index_code': None,
             'is_fallback': True,
             'source': 'unknown',
             'temperature': 50.0,

@@ -144,6 +144,8 @@ const AnalysisReport = ({
   const targetReinvestMode = input_parameters?.reinvest_mode || input_parameters?.reinvestMode || "pool_shares";
   const targetScalingRatio = Number(input_parameters?.scaling_ratio ?? input_parameters?.scalingRatio ?? 0.0);
   const targetStepMode = input_parameters?.step_mode || input_parameters?.stepMode || "atr";
+  const targetEdaStepRatios = input_parameters?.eda_step_ratios || input_parameters?.edaStepRatios || null;
+  const targetEdaSteps = input_parameters?.edaSteps || null;
 
   const normalizedInputParams = {
     ...input_parameters,
@@ -159,6 +161,9 @@ const AnalysisReport = ({
     scalingRatio: targetScalingRatio,
     step_mode: targetStepMode,
     stepMode: targetStepMode,
+    eda_step_ratios: targetEdaStepRatios,
+    edaStepRatios: targetEdaStepRatios,
+    edaSteps: targetEdaSteps,
   };
 
   return (
@@ -186,6 +191,8 @@ const AnalysisReport = ({
                 reinvestMode={targetReinvestMode}
                 scalingRatio={targetScalingRatio}
                 stepMode={targetStepMode}
+                edaStepRatios={targetEdaStepRatios}
+                edaSteps={targetEdaSteps}
               />
             </div>
           )}
@@ -210,6 +217,8 @@ const AnalysisReport = ({
                 reinvestMode={targetReinvestMode}
                 scalingRatio={targetScalingRatio}
                 stepMode={targetStepMode}
+                edaStepRatios={targetEdaStepRatios}
+                edaSteps={targetEdaSteps}
               />
             </div>
           )}

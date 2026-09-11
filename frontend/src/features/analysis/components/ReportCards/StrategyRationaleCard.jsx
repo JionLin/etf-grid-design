@@ -15,8 +15,11 @@ import {
 const StrategyRationaleCard = ({
   strategyRationale,
   adjustmentSuggestions,
+  stepMode,
 }) => {
   if (!strategyRationale) return null;
+
+  const isEdaMode = stepMode === "fixed_eda";
 
   const { atr_advantages, parameter_logic, profit_basis, market_environment } =
     strategyRationale;
@@ -150,7 +153,9 @@ const StrategyRationaleCard = ({
             <div>
               <h4 className="font-semibold text-gray-900">收益预测依据</h4>
               <p className="text-sm text-gray-600">
-                基于ATR算法的收益估算和风险评估
+                {isEdaMode
+                  ? "基于E大立体三轨与多轨风控的收益估算"
+                  : "基于ATR算法的收益估算和风险评估"}
               </p>
             </div>
           </div>
@@ -158,10 +163,12 @@ const StrategyRationaleCard = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {Object.entries(profit_basis).map(([key, value]) => {
               const keyNames = {
+                parameter_optimization: "参数优化依据",
                 historical_performance: "历史表现",
-                trading_frequency: "交易统计",
+                trading_frequency: "交易频率统计",
                 win_rate: "胜率分析",
-                risk_control: "风险控制",
+                risk_control: "多轨风险控制",
+                fund_allocation: "资金资产配置",
               };
 
               return (

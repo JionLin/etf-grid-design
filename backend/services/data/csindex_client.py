@@ -1,22 +1,19 @@
 """
 中证指数公司（CSINDEX）官方数据采集客户端
-从官网披露管道直接获取指数最新市盈率（总股本 PE-TTM）与股息率
+通过中证指数官网核心 REST API (indexCsiDsPe) 实时获取指数最新市盈率与交易日期
 """
 import logging
 from typing import Any, Dict, Optional
-import io
+from datetime import datetime, timedelta
 import requests
-import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
 class CsindexClient:
-    """中证指数公司官方披露数据采集客户端"""
+    """中证指数公司官方生产 REST 数据采集客户端"""
 
-    BASE_INDICATOR_URL = (
-        "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/file/autofile/indicator/{symbol}indicator.xls"
-    )
+    BASE_REST_URL = "https://www.csindex.com.cn/csindex-home/perf/indexCsiDsPe"
 
     def __init__(self, timeout: int = 5, session: Optional[requests.Session] = None):
         """
@@ -28,80 +25,90 @@ class CsindexClient:
         """
         self.timeout = timeout
         self.session = session or requests.Session()
+        # 隔离系统失效代理，保证直连高可用
+        self.session.trust_env = False
         self.headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Referer": "https://www.csindex.com.cn/",
+            "Accept": "application/json, text/plain, */*"
         }
 
     def get_index_valuation(self, index_code: str) -> Optional[Dict[str, Any]]:
         """
-        获取指定指数的最新官方估值指标
+        获取指定指数的最新官方估值指标 (通过生产 REST 接口)
         
         Args:
-            index_code: 指数代码，如 '000300'、'000905'、'000852'
+            index_code: 指数代码，如 '000300'、'399989'、'931151'
             
         Returns:
             Dict 包含:
                 - trade_date: 交易日期 (YYYY-MM-DD)
                 - index_code: 指数代码
-                - pe_ttm: 总股本市盈率
-                - pe_float: 自由流通股本市盈率
-                - dividend_yield: 总股本股息率 (%)
-                - dividend_yield_float: 自由流通股本股息率 (%)
-                - source: 'csindex_official'
+                - pe_ttm: 官方滚动市盈率
+                - source: 'csindex_official_rest'
         """
-        clean_code = index_code.upper().replace(".SH", "").replace(".SZ", "").replace(".CSI", "")
-        url = self.BASE_INDICATOR_URL.format(symbol=clean_code)
+        clean_code = index_code.upper().replace(".SH", "").replace(".SZ", "").replace(".CSI", "").strip()
+        if not clean_code or not clean_code.isdigit() or len(clean_code) != 6:
+            logger.debug(f"非标准中证指数代码格式: {index_code}")
+            return None
+
+        # 默认拉取近 30 天时序，取最新一条记录
+        today = datetime.now()
+        start_date = (today - timedelta(days=30)).strftime("%Y%m%d")
+        end_date = today.strftime("%Y%m%d")
+
+        params = {
+            "indexCode": clean_code,
+            "startDate": start_date,
+            "endDate": end_date
+        }
 
         try:
-            resp = self.session.get(url, headers=self.headers, timeout=self.timeout)
+            resp = self.session.get(
+                self.BASE_REST_URL,
+                params=params,
+                headers=self.headers,
+                timeout=self.timeout
+            )
             if resp.status_code != 200:
-                logger.warning(f"中证指数官方接口返回状态码异常: {resp.status_code} ({url})")
+                logger.warning(f"中证指数官方 REST 接口返回状态码异常: {resp.status_code} ({clean_code})")
                 return None
 
-            # 解析 excel 内容
-            df = pd.read_excel(io.BytesIO(resp.content))
-            if df.empty:
-                logger.warning(f"中证指数官方指标文件内容为空: {clean_code}")
+            data_json = resp.json()
+            if str(data_json.get("code")) != "200" or not data_json.get("data"):
+                logger.debug(f"中证指数官方 REST 接口未返回有效数据: {clean_code}, msg={data_json.get('msg')}")
                 return None
 
-            # 统一列名提取最新一条记录 (iloc[0])
-            latest_row = df.iloc[0]
-
-            # 寻找市盈率1与股息率1列名 (适配可能存在的不同版本列名)
-            pe_col = None
-            div_col = None
-            date_col = None
-
-            for col in df.columns:
-                c_str = str(col)
-                if "市盈率1" in c_str or "P/E1" in c_str:
-                    pe_col = col
-                elif "股息率1" in c_str or "D/P1" in c_str:
-                    div_col = col
-                elif "日期" in c_str or "Date" in c_str:
-                    date_col = col
-
-            if not pe_col:
-                logger.warning(f"未在中证指标文件中找到市盈率1字段: {df.columns.tolist()}")
+            items = data_json["data"]
+            if not isinstance(items, list) or len(items) == 0:
+                logger.warning(f"中证指数官方指标时序列表为空: {clean_code}")
                 return None
 
-            pe_val = float(latest_row[pe_col])
-            div_val = float(latest_row[div_col]) if div_col else 0.0
-            date_raw = str(latest_row[date_col]) if date_col else ""
-            date_str = date_raw.replace(".0", "").strip()
-            if len(date_str) == 8:
-                date_formatted = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+            # 获取最新交易日记录 (最后一条)
+            latest_row = items[-1]
+            raw_pe = latest_row.get("peg")
+            raw_date = str(latest_row.get("tradeDate", "")).strip()
+
+            if raw_pe is None:
+                logger.warning(f"中证官方指标缺少 peg 字段: {latest_row}")
+                return None
+
+            pe_val = float(raw_pe)
+            if pe_val <= 0:
+                return None
+
+            if len(raw_date) == 8:
+                date_formatted = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
             else:
-                date_formatted = date_str
+                date_formatted = raw_date
 
             return {
                 "trade_date": date_formatted,
                 "index_code": clean_code,
                 "pe_ttm": round(pe_val, 2),
-                "dividend_yield": round(div_val, 2),
-                "source": "csindex_official",
+                "source": "csindex_official_rest"
             }
 
         except Exception as e:
-            logger.error(f"抓取或解析中证指数估值失败 [{clean_code}]: {str(e)}")
+            logger.warning(f"抓取或解析中证指数官网 REST 估值失败 [{clean_code}]: {str(e)}")
             return None

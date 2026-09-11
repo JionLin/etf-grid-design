@@ -49,6 +49,9 @@ const GridParametersCard = ({
     30000
   );
 
+  const currentStepMode = stepMode || gridStrategy?.step_mode || inputParameters?.step_mode || "atr";
+  const isEdaMode = currentStepMode === "fixed_eda";
+
   const {
     current_price,
     price_range,
@@ -217,7 +220,9 @@ const GridParametersCard = ({
           <div>
             <h4 className="font-semibold text-gray-900">价格区间设置</h4>
             <p className="text-sm text-gray-600">
-              基于ATR算法动态计算的交易区间
+              {isEdaMode
+                ? "基于E大原版三轨步长规划的立体防守区间"
+                : "基于ATR算法动态计算的交易区间"}
             </p>
           </div>
         </div>
@@ -322,7 +327,9 @@ const GridParametersCard = ({
             <div className="text-xl font-bold text-gray-900">
               {grid_config.count}个
             </div>
-            <div className="text-xs text-gray-600">基于ATR算法计算</div>
+            <div className="text-xs text-gray-600">
+              {isEdaMode ? "复合三轨有效档位总数" : "基于ATR算法计算"}
+            </div>
           </div>
 
           <div className="bg-gray-50 p-4 rounded-lg">
@@ -451,7 +458,13 @@ const GridParametersCard = ({
                     </span>
                     {(stepMode === "fixed_eda" || inputParameters?.stepMode === "fixed_eda") ? (
                       <span className="text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-mono">
-                        🏛️ E大原版 5%/15%/30%
+                        🏛️ E大原版 {
+                          gridStrategy?.composite_grid?.rails?.small
+                            ? `${Math.round(gridStrategy.composite_grid.rails.small.step_ratio * 100)}%/${Math.round(gridStrategy.composite_grid.rails.medium.step_ratio * 100)}%/${Math.round(gridStrategy.composite_grid.rails.large.step_ratio * 100)}%`
+                            : inputParameters?.edaSteps
+                            ? `${inputParameters.edaSteps.small}%/${inputParameters.edaSteps.medium}%/${inputParameters.edaSteps.large}%`
+                            : "5%/15%/30%"
+                        }
                       </span>
                     ) : (
                       <span className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-mono">
