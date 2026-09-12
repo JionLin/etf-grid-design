@@ -429,7 +429,9 @@ const BacktestCard = ({
                 <ShieldAlert className="w-3.5 h-3.5 text-purple-600" />
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-black text-purple-900 font-mono">{summary.win_rate}%</span>
+                <span className="text-2xl font-black text-purple-900 font-mono">
+                  {summary.win_rate == null ? "—" : `${summary.win_rate}%`}
+                </span>
                 <span className="text-xs text-gray-500 font-mono">回撤 {summary.max_drawdown}%</span>
               </div>
               <div className="text-[11px] text-gray-500 mt-1">
@@ -614,7 +616,7 @@ const BacktestCard = ({
               {/* 彩虹比例条 */}
               <div className="w-full h-3.5 bg-gray-100 rounded-full overflow-hidden flex mb-3 shadow-inner">
                 {railAttribution.map((r) => {
-                  const widthPct = Math.max(5, r.profit_ratio || 33);
+                  const widthPct = Number(r.profit_ratio) > 0 ? Number(r.profit_ratio) : 0;
                   const color =
                     r.rail === "large"
                       ? "bg-purple-500"
@@ -655,7 +657,9 @@ const BacktestCard = ({
                       </div>
                       <div className="flex items-center justify-between text-gray-600 mt-2 font-mono">
                         <span>成交: {r.trades_count} 次</span>
-                        <span className="font-bold text-gray-900">贡献利润: +¥{r.profit}</span>
+                        <span className={`font-bold ${Number(r.profit) < 0 ? "text-green-700" : "text-gray-900"}`}>
+                          贡献利润: {Number(r.profit) > 0 ? `+¥${r.profit}` : Number(r.profit) < 0 ? `-¥${Math.abs(Number(r.profit))}` : `¥${r.profit}`}
+                        </span>
                       </div>
                     </div>
                   );

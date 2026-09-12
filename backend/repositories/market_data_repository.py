@@ -188,7 +188,9 @@ class MarketDataRepository:
                     return pd.DataFrame()
 
                 data = [dict(r) for r in rows]
-                if limit and len(data) > limit:
+                # 已给定起止日期时，日期区间就是样本边界，禁止再用估算交易日数截掉最早的 K 线
+                bounded_by_dates = bool(start_date and end_date)
+                if limit and len(data) > limit and not bounded_by_dates:
                     data = data[-limit:]
 
                 df = pd.DataFrame(data)

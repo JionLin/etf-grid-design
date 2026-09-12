@@ -35,6 +35,21 @@ class TestMarketDataRepository(unittest.TestCase):
         self.assertEqual(len(df_slice), 2)
         self.assertEqual(df_slice.iloc[0]["trade_date"].strftime("%Y-%m-%d"), "2024-01-03")
 
+    def test_date_range_ignores_trading_day_limit(self):
+        """已给定起止日期时，不得用 limit 截掉区间内更早的 K 线。"""
+        records = [
+            {"trade_date": "2024-01-02", "open": 1.0, "close": 1.02},
+            {"trade_date": "2024-01-03", "open": 1.02, "close": 1.01},
+            {"trade_date": "2024-01-04", "open": 1.01, "close": 1.05},
+        ]
+        self.repo.save_bars("515220", records)
+
+        df_slice = self.repo.get_bars(
+            "515220", start_date="2024-01-02", end_date="2024-01-04", limit=1
+        )
+        self.assertEqual(len(df_slice), 3)
+        self.assertEqual(df_slice.iloc[0]["trade_date"].strftime("%Y-%m-%d"), "2024-01-02")
+
     def test_idempotent_replace_and_range(self):
         """测试相同交易日幂等覆盖与起止范围获取"""
         # 第一次写入

@@ -116,6 +116,55 @@ def test_mode_b_free_shares_transfer(mock_composite_grid):
     assert pool_info["total_profit_accumulated"] > 0
 
 
+def test_fee_eaten_sell_is_loss_and_excluded_from_win_rate():
+    """手续费吃掉价差时记亏损，且不计入做T胜率。"""
+    engine = GridBacktestEngine()
+    thin_grid = {
+        "rails": {
+            "small": {
+                "name": "小网 (高频做T)",
+                "tag": "小网",
+                "step_ratio": 0.001,
+                "buy_levels": [],
+                "sell_levels": [
+                    {"level_index": 1, "price": 1.001, "shares": 100},
+                ],
+            }
+        }
+    }
+    k_lines = [
+        {"date": f"2026-06-0{i}", "open": 1.000, "high": 1.002, "low": 1.0005, "close": 1.001}
+        for i in range(1, 6)
+    ]
+    df = pd.DataFrame(k_lines)
+    res = engine.run_backtest(df, total_capital=100000, composite_grid=thin_grid)
+    sells = [t for t in res["total_trades_all"] if t["action"] == "SELL"]
+
+    assert len(sells) == 1
+    assert sells[0]["profit"] < 0
+    assert res["summary"]["win_rate"] == 0.0
+
+    small_rail = next(r for r in res["rail_attribution"] if r["rail"] == "small")
+    assert small_rail["profit"] < 0
+    assert small_rail["profit_ratio"] != 33.3
+    assert small_rail["profit_ratio"] == 0.0
+
+
+def test_win_rate_is_null_when_no_sells(mock_composite_grid):
+    """没有任何卖出时，胜率必须为空，不得显示 100%。"""
+    engine = GridBacktestEngine()
+    k_lines = [
+        {"date": f"2026-06-0{i}", "open": 0.330, "high": 0.332, "low": 0.328, "close": 0.330}
+        for i in range(1, 6)
+    ]
+    df = pd.DataFrame(k_lines)
+    res = engine.run_backtest(df, total_capital=100000, composite_grid=mock_composite_grid)
+    sells = [t for t in res["total_trades_all"] if t["action"] == "SELL"]
+
+    assert sells == []
+    assert res["summary"]["win_rate"] is None
+
+
 def test_t1_lock_protection(mock_composite_grid):
     """测试T+1保护规则：当日买入的同一槽位当日不可卖出"""
     engine = GridBacktestEngine()

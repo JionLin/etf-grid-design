@@ -1,26 +1,55 @@
 #!/bin/bash
 
-# ETF网格交易策略设计工具启动脚本
+# ETF网格交易策略设计工具一键启动脚本
 
 echo "🚀 启动ETF网格交易策略设计工具..."
 echo "=================================="
 
-# 检查后端是否已在运行
-if pgrep -f "python.*backend/app.py" > /dev/null; then
-    echo "✅ 后端服务已在运行"
+# 检查指定端口是否处于监听状态
+check_port() {
+    local port=$1
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -i :"$port" -sTCP:LISTEN >/dev/null 2>&1
+        return $?
+    fi
+    if command -v nc >/dev/null 2>&1; then
+        nc -z 127.0.0.1 "$port" >/dev/null 2>&1
+        return $?
+    fi
+    return 1
+}
+
+BACKEND_PID=""
+FRONTEND_PID=""
+
+# 1. 检查后端服务 (端口 5001)
+if check_port 5001; then
+    echo "✅ 后端服务已在运行 (端口 5001 活跃)"
 else
     echo "📦 启动后端服务..."
     uv run python backend/app.py &
-    sleep 3
+    BACKEND_PID=$!
+    for i in {1..12}; do
+        if check_port 5001; then
+            break
+        fi
+        sleep 0.5
+    done
 fi
 
-# 检查前端是否已在运行
-if pgrep -f "npm.*dev" > /dev/null; then
-    echo "✅ 前端服务已在运行"
+# 2. 检查前端服务 (端口 3000)
+if check_port 3000; then
+    echo "✅ 前端服务已在运行 (端口 3000 活跃)"
 else
     echo "📦 启动前端服务..."
-    cd frontend && npm run dev &
-    sleep 3
+    (cd frontend && npm run dev) &
+    FRONTEND_PID=$!
+    for i in {1..15}; do
+        if check_port 3000; then
+            break
+        fi
+        sleep 0.5
+    done
 fi
 
 echo ""
@@ -37,6 +66,19 @@ echo ""
 echo "⚠️  按 Ctrl+C 停止服务"
 echo ""
 
-# 等待用户输入来停止服务
-trap 'echo "正在停止服务..."; pkill -f "python.*backend/app.py"; pkill -f "npm.*dev"; exit 0' INT
+cleanup() {
+    echo ""
+    echo "🛑 正在停止服务..."
+    if [ -n "$FRONTEND_PID" ]; then
+        kill -TERM "$FRONTEND_PID" 2>/dev/null
+    fi
+    if [ -n "$BACKEND_PID" ]; then
+        kill -TERM "$BACKEND_PID" 2>/dev/null
+    fi
+    pkill -f "python.*backend/app.py" 2>/dev/null
+    pkill -f "vite" 2>/dev/null
+    exit 0
+}
+
+trap cleanup INT TERM
 wait

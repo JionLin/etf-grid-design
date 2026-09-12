@@ -271,8 +271,6 @@ class GridBacktestEngine:
                     raw_spread = round(shares_to_sell * (slot.sell_price - slot.buy_price), 2)
                     profit = round(raw_spread - fee - self.calculate_commission(round(shares_to_sell * slot.buy_price, 2)), 2)
 
-                profit = max(0.01, profit)  # 理论上正常网格必然产生正向收益
-
                 # 资金处理 (模式 A 现金回流 / 模式 B 留利润)
                 if reinvest_mode == "pool_shares":
                     capital_back = sell_amt - fee - profit
@@ -423,18 +421,24 @@ class GridBacktestEngine:
         buy_count = sum(1 for t in trades if t["action"] == "BUY")
         total_trades_count = len(trades)
         paired_count = min(sell_count, buy_count)
-        win_rate = round((paired_count / max(1, sell_count)) * 100, 1) if sell_count > 0 else 100.0
+        winning_sells = sum(
+            1 for t in trades if t["action"] == "SELL" and float(t.get("profit") or 0) > 0
+        )
+        win_rate = round(winning_sells / sell_count * 100, 1) if sell_count > 0 else None
 
         # 网格做 T 纯差价落袋利润总额
         grid_cash_profit = sum(t.get("profit", 0.0) for t in trades if t["action"] == "SELL")
 
         # 4. 三轨利润归因计算
-        total_rail_profit = sum(max(0.0, s["profit"]) for s in rail_stats.values())
+        signed_profits = {
+            r_key: round(rail_stats[r_key]["profit"], 2) for r_key in ["small", "medium", "large"]
+        }
+        positive_total = sum(value for value in signed_profits.values() if value > 0)
         rail_attribution = []
         for r_key in ["small", "medium", "large"]:
             st = rail_stats[r_key]
-            p_val = max(0.0, round(st["profit"], 2))
-            pct = round(p_val / total_rail_profit * 100, 1) if total_rail_profit > 0 else 33.3
+            p_val = signed_profits[r_key]
+            pct = round(p_val / positive_total * 100, 1) if p_val > 0 and positive_total > 0 else 0.0
             rail_attribution.append({
                 "rail": r_key,
                 "name": st["name"],

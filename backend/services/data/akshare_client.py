@@ -46,7 +46,7 @@ class AkShareClient:
         except Exception as e:
             logger.warning(f"AkShare 接口网络异常，切换备用分段源 ({clean_code}): {e}")
 
-        return self._get_fallback_kline(clean_code, days=days)
+        return self._get_fallback_kline(clean_code, days=days, start_date=start_date, end_date=end_date)
 
     def _sync_and_fill_kline_lake(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
         """
@@ -71,7 +71,7 @@ class AkShareClient:
             df = self._fetch_raw_kline_network(clean_code, start_date, end_date, days=days)
             if df is not None and not df.empty:
                 self.market_repo.save_bars(clean_code, df)
-            return self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end, limit=est_target_days)
+            return self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end)
 
         # 场景 B: 最新端缺口比对 (local_max < norm_end)
         if local_max < norm_end:
@@ -94,12 +94,14 @@ class AkShareClient:
         curr_min = local_range_now["min_date"]
         if est_target_days > curr_count and curr_min and curr_min > norm_start:
             logger.info(f"→ 检测到历史端跨度缺口: 需要 {est_target_days} 交易日，本地仅 {curr_count} 交易日，向前回溯补齐")
-            hist_df = self._get_fallback_kline(clean_code, days=days)
+            hist_df = self._get_fallback_kline(
+                clean_code, days=days, start_date=start_date, end_date=end_date
+            )
             if hist_df is not None and not hist_df.empty:
                 self.market_repo.save_bars(clean_code, hist_df)
 
         # 从本地 SQLite 毫秒级直出最终切片
-        res_df = self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end, limit=est_target_days)
+        res_df = self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end)
         return res_df
 
     def get_etf_daily_data(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
@@ -129,7 +131,7 @@ class AkShareClient:
             logger.warning(f"时序库处理异常，回退传统链路 ({etf_code}): {e}")
 
         # 2. 兜底回退：备用分段源
-        fallback_df = self._get_fallback_kline(etf_code, days=days)
+        fallback_df = self._get_fallback_kline(etf_code, days=days, start_date=start_date, end_date=end_date)
         if fallback_df is not None and not fallback_df.empty:
             try:
                 self.market_repo.save_bars(etf_code, fallback_df)
@@ -736,23 +738,41 @@ class AkShareClient:
             logger.warning(f"备用行情获取失败: {str(e)}")
             return None
 
-    def _get_fallback_kline(self, etf_code: str, days: int = 180) -> Optional[pd.DataFrame]:
-        """备用K线源 (腾讯财经) - 支持向前多轮分段拉取合并"""
+    def _normalize_calendar_date(self, value: Optional[str]) -> Optional[str]:
+        """把 YYYYMMDD 或 YYYY-MM-DD 归一成 YYYY-MM-DD。"""
+        if not value:
+            return None
+        text = str(value).replace("-", "")
+        if len(text) == 8 and text.isdigit():
+            return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+        return str(value)[:10]
+
+    def _get_fallback_kline(
+        self,
+        etf_code: str,
+        days: int = 180,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Optional[pd.DataFrame]:
+        """备用K线源 (腾讯财经) - 按日历起止分段拉取，禁止按估算交易日截尾。"""
         try:
             import requests
             code = etf_code.split('.')[0]
             prefix = 'sh' if code.startswith(('5', '6')) else 'sz'
-            
-            # 换算目标交易日数 (A股通常1年242~250个交易日)
-            est_target_days = int(days * 250 / 365) if days > 30 else days
-            
+            bound_start = self._normalize_calendar_date(start_date)
+            bound_end = self._normalize_calendar_date(end_date)
+            if bound_start is None:
+                bound_start = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            if bound_end is None:
+                bound_end = datetime.now().strftime("%Y-%m-%d")
+
             session = requests.Session()
             session.trust_env = False  # 避免本地代理环境干扰
             
             all_raw_data = []
             current_end = ""
             chunk_size = 640
-            max_loops = 5  # 最多拉取5轮 (可达3000+交易日，超12年)
+            max_loops = 8  # 最多拉取8轮，覆盖 5 年日历跨度
             
             for _ in range(max_loops):
                 if not current_end:
@@ -779,16 +799,19 @@ class AkShareClient:
                     break
                 current_end = earliest_date
                 
-                # 若已满足目标交易日数，或单批返回明显少于 640 (触及上市首日)，结束循环
-                if len(all_raw_data) >= est_target_days or len(raw_data) < chunk_size - 10:
+                # 单批明显不足 640 表示触及上市首日；已覆盖日历起点则停止
+                if len(raw_data) < chunk_size - 10 or earliest_date <= bound_start:
                     break
             
             if not all_raw_data:
                 return None
-            
-            # 若合并结果超出目标交易日数，取最近的 est_target_days 条
-            if len(all_raw_data) > est_target_days:
-                all_raw_data = all_raw_data[-est_target_days:]
+
+            all_raw_data = [
+                row for row in all_raw_data
+                if bound_start <= str(row[0])[:10] <= bound_end
+            ]
+            if not all_raw_data:
+                return None
             
             records = []
             for row in all_raw_data:
