@@ -21,13 +21,15 @@ import {
   getBacktestDistinctETFs,
 } from "@shared/services/api";
 
-export default function BacktestArchiveView() {
+export default function BacktestArchiveView({ onApplyParams }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [records, setRecords] = useState([]);
   const [distinctEtfs, setDistinctEtfs] = useState([]);
   const [selectedEtf, setSelectedEtf] = useState("");
   const [selectedDays, setSelectedDays] = useState("");
+  const [latestOnly, setLatestOnly] = useState(true);
+  const [appliedNotice, setAppliedNotice] = useState(null);
 
   // 展开查看详情的状态
   const [expandedRunId, setExpandedRunId] = useState(null);
@@ -47,6 +49,7 @@ export default function BacktestArchiveView() {
       const params = {};
       if (selectedEtf) params.etfCode = selectedEtf;
       if (selectedDays) params.days = selectedDays;
+      params.latestOnly = latestOnly ? "true" : "false";
 
       const [res, etfRes] = await Promise.all([
         getBacktestRecords(params),
@@ -71,7 +74,7 @@ export default function BacktestArchiveView() {
 
   useEffect(() => {
     loadRecords();
-  }, [selectedEtf, selectedDays]);
+  }, [selectedEtf, selectedDays, latestOnly]);
 
   // 切换展开/收起详情
   const toggleDetail = async (runId) => {
@@ -114,6 +117,18 @@ export default function BacktestArchiveView() {
       alert("删除异常: " + err.message);
     }
   };
+
+  // 回填参数
+  const handleApplyParams = (record, e) => {
+    e.stopPropagation();
+    if (onApplyParams) {
+      onApplyParams(record.params || {}, record);
+    }
+    setAppliedNotice(`已成功将【${rec_label(record)}】参数回填至回测面板！`);
+    setTimeout(() => setAppliedNotice(null), 3000);
+  };
+
+  const rec_label = (r) => `${r.etf_code} ${r.etf_name} (${r.backtest_days}天)`;
 
   // 当前展开记录的流水与分轨
   const activeDetail = expandedRunId ? detailData[expandedRunId] : null;
@@ -208,6 +223,17 @@ export default function BacktestArchiveView() {
             <option value="1825">5 年 (牛熊)</option>
           </select>
 
+          {/* 仅看各周期最新开关 */}
+          <label className="flex items-center gap-1.5 cursor-pointer text-xs text-gray-700 select-none bg-gray-50 border border-gray-200 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
+            <input
+              type="checkbox"
+              checked={latestOnly}
+              onChange={(e) => setLatestOnly(e.target.checked)}
+              className="rounded text-indigo-600 focus:ring-indigo-500"
+            />
+            <span className="font-medium">仅看各周期最新</span>
+          </label>
+
           {/* 刷新 */}
           <button
             type="button"
@@ -220,6 +246,14 @@ export default function BacktestArchiveView() {
           </button>
         </div>
       </div>
+
+      {/* 回填成功提示 */}
+      {appliedNotice && (
+        <div className="p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs border border-emerald-200 flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-emerald-600" />
+          <span>{appliedNotice}</span>
+        </div>
+      )}
 
       {/* 档案列表 */}
       {error && (
@@ -309,6 +343,15 @@ export default function BacktestArchiveView() {
 
                     {/* 操作按钮 */}
                     <div className="flex items-center gap-2 pl-3 border-l border-gray-200">
+                      <button
+                        type="button"
+                        onClick={(e) => handleApplyParams(rec, e)}
+                        className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold transition-colors shadow-2xs"
+                        title="将此档案的资金量与步长配置回填至策略回测面板"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        回填参数
+                      </button>
                       <button
                         type="button"
                         onClick={(e) => handleDelete(rec.run_id, e)}

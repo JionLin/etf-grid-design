@@ -139,18 +139,10 @@ class BacktestRepository:
         etf_code: Optional[str] = None,
         days: Optional[int] = None,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
+        latest_only: bool = True,
     ) -> Dict[str, Any]:
-        """获取回测档案轻量列表（不包含冗长 trades_json）"""
-        query = """
-            SELECT 
-                run_id, created_at, etf_code, etf_name, backtest_days, actual_days,
-                total_capital, step_mode, reinvest_mode,
-                annual_return, max_drawdown, total_profit, total_trades, free_shares,
-                is_partial_history, partial_reason, params_json
-            FROM backtest_runs
-        """
-        count_query = "SELECT COUNT(*) as total FROM backtest_runs"
+        """获取回测档案轻量列表 (支持按标的+周期去重，仅展示最新一条)"""
         conditions = []
         params: List[Any] = []
 
@@ -162,12 +154,46 @@ class BacktestRepository:
             conditions.append("backtest_days = ?")
             params.append(int(days))
 
-        if conditions:
-            where_clause = " WHERE " + " AND ".join(conditions)
-            query += where_clause
-            count_query += where_clause
+        if latest_only:
+            query = """
+                SELECT 
+                    run_id, created_at, etf_code, etf_name, backtest_days, actual_days,
+                    total_capital, step_mode, reinvest_mode,
+                    annual_return, max_drawdown, total_profit, total_trades, free_shares,
+                    is_partial_history, partial_reason, params_json
+                FROM (
+                    SELECT *,
+                        ROW_NUMBER() OVER (PARTITION BY etf_code, backtest_days ORDER BY id DESC) as rn
+                    FROM backtest_runs
+            """
+            count_query = """
+                SELECT COUNT(*) as total FROM (
+                    SELECT id,
+                        ROW_NUMBER() OVER (PARTITION BY etf_code, backtest_days ORDER BY id DESC) as rn
+                    FROM backtest_runs
+            """
+            if conditions:
+                where_clause = " WHERE " + " AND ".join(conditions)
+                query += where_clause
+                count_query += where_clause
+            query += ") WHERE rn = 1 ORDER BY id DESC LIMIT ? OFFSET ?"
+            count_query += ") WHERE rn = 1"
+        else:
+            query = """
+                SELECT 
+                    run_id, created_at, etf_code, etf_name, backtest_days, actual_days,
+                    total_capital, step_mode, reinvest_mode,
+                    annual_return, max_drawdown, total_profit, total_trades, free_shares,
+                    is_partial_history, partial_reason, params_json
+                FROM backtest_runs
+            """
+            count_query = "SELECT COUNT(*) as total FROM backtest_runs"
+            if conditions:
+                where_clause = " WHERE " + " AND ".join(conditions)
+                query += where_clause
+                count_query += where_clause
+            query += " ORDER BY id DESC LIMIT ? OFFSET ?"
 
-        query += " ORDER BY id DESC LIMIT ? OFFSET ?"
         fetch_params = params + [max(1, min(200, limit)), max(0, offset)]
 
         conn = self._get_connection()

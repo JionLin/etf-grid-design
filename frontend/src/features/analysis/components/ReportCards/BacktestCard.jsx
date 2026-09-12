@@ -18,6 +18,7 @@ import {
   Download,
   Filter,
   Layers,
+  Target,
 } from "lucide-react";
 import { runBacktest } from "@shared/services/api";
 
@@ -40,13 +41,19 @@ const BacktestCard = ({
   const [selectedRail, setSelectedRail] = useState("all");
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
+  const [anchorMode, setAnchorMode] = useState("auto"); // "auto" | "custom"
+  const [customBasePrice, setCustomBasePrice] = useState("");
 
   // 加载回测数据
-  const fetchBacktest = async (days) => {
+  const fetchBacktest = async (days, forcedCustomPrice = null) => {
     if (!etfCode) return;
     setLoading(true);
     setError(null);
     try {
+      const activeCustomPrice = forcedCustomPrice !== null 
+        ? forcedCustomPrice 
+        : (anchorMode === "custom" && customBasePrice ? Number(customBasePrice) : null);
+
       const res = await runBacktest({
         etfCode,
         totalCapital: safeTotalCapital,
@@ -56,6 +63,7 @@ const BacktestCard = ({
         stepMode,
         edaStepRatios,
         edaSteps,
+        customBasePrice: activeCustomPrice,
       });
       if (res?.success && res.data) {
         setBacktestData(res.data);
@@ -73,7 +81,7 @@ const BacktestCard = ({
     if (etfCode) {
       fetchBacktest(backtestDays);
     }
-  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps]);
+  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps, anchorMode]);
 
   const summary = backtestData?.summary;
   const profitPool = backtestData?.profit_pool || summary?.profit_pool;
@@ -283,6 +291,68 @@ const BacktestCard = ({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* 回测基准锚点控制栏 */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-slate-700 flex items-center gap-1.5">
+            <Target className="w-4 h-4 text-blue-600" />
+            回测基准锚点 (P₀):
+          </span>
+          <div className="inline-flex items-center gap-2 bg-white px-2 py-1 rounded-lg border border-slate-200">
+            <label className="flex items-center gap-1 cursor-pointer">
+              <input
+                type="radio"
+                name="anchorMode"
+                value="auto"
+                checked={anchorMode === "auto"}
+                onChange={() => setAnchorMode("auto")}
+                className="text-blue-600 focus:ring-blue-500"
+              />
+              <span className="font-medium text-slate-800">⚡ 自动首日开盘价 (推荐)</span>
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer ml-2">
+              <input
+                type="radio"
+                name="anchorMode"
+                value="custom"
+                checked={anchorMode === "custom"}
+                onChange={() => setAnchorMode("custom")}
+                className="text-blue-600 focus:ring-blue-500"
+              />
+              <span className="font-medium text-slate-800">✏️ 自定义回测点位</span>
+            </label>
+          </div>
+        </div>
+
+        {anchorMode === "auto" ? (
+          <div className="text-slate-500 font-mono flex items-center gap-1.5">
+            <span>当前铺网基准:</span>
+            <span className="font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded">
+              ¥{summary?.history_meta?.backtest_base_price ? Number(summary.history_meta.backtest_base_price).toFixed(3) : "..."}
+            </span>
+            <span className="text-[11px] text-slate-400 font-sans">(消除未来函数)</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              step="0.001"
+              placeholder="输入基准价(元)"
+              value={customBasePrice}
+              onChange={(e) => setCustomBasePrice(e.target.value)}
+              className="w-28 px-2 py-1 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-xs focus:ring-1 focus:ring-blue-500"
+            />
+            <button
+              type="button"
+              onClick={() => fetchBacktest(backtestDays)}
+              className="px-2.5 py-1 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 shadow-2xs transition-colors"
+            >
+              应用
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 加载或报错状态 */}

@@ -81,6 +81,37 @@ class TestBacktestRepository(unittest.TestCase):
         self.assertIsNone(self.repo.get_run_detail(run_id))
         self.assertEqual(self.repo.list_runs()['total'], 0)
 
+    def test_deduplication_latest_only(self):
+        """测试同一标的同一周期去重仅展示最新一条"""
+        mock_result_1 = {
+            'summary': {'annualized_return': 10.0, 'total_profit': 1000.0},
+            'profit_pool': {'free_shares': 0},
+            'equity_curve': [],
+            'total_trades_all': []
+        }
+        mock_result_2 = {
+            'summary': {'annualized_return': 15.0, 'total_profit': 1500.0},
+            'profit_pool': {'free_shares': 0},
+            'equity_curve': [],
+            'total_trades_all': []
+        }
+
+        # 插入两条同标的、同周期(180天)的记录
+        id_1 = self.repo.save_run('512170', '医疗ETF', 180, 50000.0, 'atr', 'cash', mock_result_1)
+        id_2 = self.repo.save_run('512170', '医疗ETF', 180, 50000.0, 'atr', 'cash', mock_result_2)
+
+        # 1. 默认去重 (latest_only=True)
+        res_dedup = self.repo.list_runs(etf_code='512170', latest_only=True)
+        self.assertEqual(res_dedup['total'], 1)
+        self.assertEqual(len(res_dedup['records']), 1)
+        self.assertEqual(res_dedup['records'][0]['run_id'], id_2)
+        self.assertEqual(res_dedup['records'][0]['annual_return'], 15.0)
+
+        # 2. 全量查看 (latest_only=False)
+        res_all = self.repo.list_runs(etf_code='512170', latest_only=False)
+        self.assertEqual(res_all['total'], 2)
+        self.assertEqual(len(res_all['records']), 2)
+
 
 if __name__ == '__main__':
     unittest.main()

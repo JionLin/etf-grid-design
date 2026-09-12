@@ -61,6 +61,33 @@ class TestLongTermBacktest(unittest.TestCase):
         self.assertFalse(meta['is_partial_history'])
         self.assertIsNone(meta['partial_reason'])
         self.assertEqual(res['summary']['history_meta']['actual_trading_days'], 1250)
+        self.assertEqual(meta['anchor_mode'], 'inception_open')
+        self.assertAlmostEqual(meta['backtest_base_price'], 1.0, places=2)
+
+    def test_backtest_custom_base_price_override(self):
+        """测试指定自定义回测基准价格覆盖生效"""
+        mock_df = self._generate_mock_df(365)
+        self.service.get_historical_data = MagicMock(return_value=mock_df)
+        self.service.suitability_analyzer.comprehensive_evaluation.return_value = {
+            'atr_analysis': {'current_atr_ratio': 0.025}
+        }
+        self.service.grid_optimizer.calculate_composite_steps.return_value = {}
+        self.service.composite_grid_calculator.calculate_composite_grid.return_value = {}
+        self.service.backtest_engine.run_backtest.return_value = {'summary': {}}
+
+        res = self.service.run_strategy_backtest(
+            etf_code='512170',
+            total_capital=100000.0,
+            backtest_days=365,
+            custom_base_price=1.25,
+        )
+
+        self.assertEqual(res['history_meta']['anchor_mode'], 'custom')
+        self.assertEqual(res['history_meta']['backtest_base_price'], 1.25)
+        # 验证传入 calculator 的价格正是 1.25
+        self.service.composite_grid_calculator.calculate_composite_grid.assert_called_with(
+            100000.0, 1.25, {}, base_position_ratio=0.5, scaling_ratio=0.0
+        )
 
     def test_sub_new_etf_adaptive_handling(self):
         """测试次新 ETF（上市仅 150 天，请求 1095 天）自适应平滑处理，不抛出异常"""

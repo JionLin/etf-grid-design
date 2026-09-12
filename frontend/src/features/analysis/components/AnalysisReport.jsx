@@ -233,6 +233,8 @@ const AnalysisReport = ({
               reinvestMode={targetReinvestMode}
               scalingRatio={targetScalingRatio}
               stepMode={targetStepMode}
+              edaStepRatios={targetEdaStepRatios}
+              edaSteps={targetEdaSteps}
             />
           )}
 
@@ -248,7 +250,11 @@ const AnalysisReport = ({
 
           {/* 回测档案库标签页 */}
           {activeTab === "archive" && (
-            <BacktestArchiveView />
+            <BacktestArchiveView
+              onApplyParams={() => {
+                setActiveTab("backtest");
+              }}
+            />
           )}
         </div>
       </div>

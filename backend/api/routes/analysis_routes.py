@@ -222,6 +222,16 @@ def run_backtest():
                         'large': round(l, 4),
                     }
 
+        # 接收可选的自定义回测基准锚点价格
+        custom_base_price = data.get('customBasePrice', data.get('custom_base_price'))
+        if custom_base_price is not None:
+            try:
+                custom_base_price = float(custom_base_price)
+                if custom_base_price <= 0:
+                    custom_base_price = None
+            except (ValueError, TypeError):
+                custom_base_price = None
+
         result = etf_service.run_strategy_backtest(
             etf_code=etf_code,
             total_capital=total_capital,
@@ -231,6 +241,7 @@ def run_backtest():
             reinvest_mode=reinvest_mode,
             step_mode=step_mode,
             eda_step_ratios=eda_step_ratios,
+            custom_base_price=custom_base_price,
         )
 
         # 自动归档至本地 SQLite 回测档案库
@@ -266,19 +277,22 @@ def run_backtest():
 
 @analysis_bp.route('/api/backtest/records', methods=['GET'])
 def get_backtest_records():
-    """获取历史回测档案列表 (支持按标的和周期筛选)"""
+    """获取历史回测档案列表 (支持按标的和周期筛选，支持最新去重)"""
     try:
         etf_code = request.args.get('etfCode') or request.args.get('etf_code')
         days = request.args.get('days')
         days_int = int(days) if days and days.isdigit() else None
         limit = int(request.args.get('limit', 50))
         offset = int(request.args.get('offset', 0))
+        latest_only_param = request.args.get('latestOnly', request.args.get('latest_only', 'true'))
+        latest_only = str(latest_only_param).lower() in ['true', '1', 'yes']
 
         records_data = backtest_repo.list_runs(
             etf_code=etf_code,
             days=days_int,
             limit=limit,
             offset=offset,
+            latest_only=latest_only,
         )
         return jsonify({'success': True, 'data': records_data})
     except Exception as e:

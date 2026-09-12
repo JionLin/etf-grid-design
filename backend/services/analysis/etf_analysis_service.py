@@ -609,6 +609,7 @@ class ETFAnalysisService:
         reinvest_mode: str = 'cash',
         step_mode: str = 'atr',
         eda_step_ratios: Optional[Dict[str, float]] = None,
+        custom_base_price: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         运行策略历史回测
@@ -621,6 +622,8 @@ class ETFAnalysisService:
             scaling_ratio: 逐格加码比例 (默认 0.0)
             reinvest_mode: 做T收益模式 ('cash' 全额留现金, 'pool_shares' 利润池滚存留股)
             step_mode: 步长模式 ('atr' | 'fixed_eda')
+            eda_step_ratios: E大自定义各轨步长
+            custom_base_price: 自定义历史回测基准锚点价格 (可选，默认使用首日真实开盘价)
 
         Returns:
             回测报告
@@ -642,18 +645,31 @@ class ETFAnalysisService:
             # 次新标的自适应判定：标的上市跨度明显少于请求周期（首尾日历跨度不足 70% 且交易日数不足 50%）
             is_partial_history = (actual_calendar_days < int(safe_days * 0.70)) and (actual_trading_days < int(safe_days * 0.50))
 
+            # 确定回测网格铺设基准价格 (消除未来函数偏差，优先自定义回测基准，默认首日开盘价)
+            if custom_base_price is not None and float(custom_base_price) > 0:
+                backtest_base_price = float(custom_base_price)
+                anchor_mode = "custom"
+            else:
+                open_val = df.iloc[0].get('open')
+                if pd.notna(open_val) and float(open_val) > 0:
+                    backtest_base_price = float(open_val)
+                else:
+                    backtest_base_price = float(df.iloc[0]['close'])
+                anchor_mode = "inception_open"
+
             current_price = float(df.iloc[-1]['close'])
             etf_info = self.get_etf_basic_info(etf_code) or {'code': etf_code, 'name': etf_code}
             suitability = self.suitability_analyzer.comprehensive_evaluation(df, etf_info)
             atr_analysis = suitability['atr_analysis']
             atr_ratio = atr_analysis['current_atr_ratio']
 
+            # 以当年真实基准价格 backtest_base_price 展开回测网格阶梯
             composite_steps = self.grid_optimizer.calculate_composite_steps(
-                current_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
+                backtest_base_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
                 eda_step_ratios=eda_step_ratios
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
-                total_capital, current_price, composite_steps, base_position_ratio=0.5,
+                total_capital, backtest_base_price, composite_steps, base_position_ratio=0.5,
                 scaling_ratio=scaling_ratio
             )
 
@@ -676,6 +692,9 @@ class ETFAnalysisService:
                 'end_date': end_date_str,
                 'is_partial_history': is_partial_history,
                 'partial_reason': f"标的上市仅 {actual_calendar_days} 天（共 {actual_trading_days} 交易日），已自适应回测全量可用历史" if is_partial_history else None,
+                'backtest_base_price': round(backtest_base_price, 3),
+                'anchor_mode': anchor_mode,
+                'latest_market_price': round(current_price, 3),
             }
             backtest_res['history_meta'] = history_meta
             if 'summary' in backtest_res and isinstance(backtest_res['summary'], dict):
