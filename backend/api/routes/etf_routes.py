@@ -27,6 +27,27 @@ def get_popular_etfs():
             'error': '获取热门ETF列表失败'
         }), 500
 
+@etf_bp.route('/api/etf/radar', methods=['GET'])
+def get_etf_radar():
+    """获取选品雷达优选榜单"""
+    try:
+        category = request.args.get('category', 'all')
+        limit = int(request.args.get('limit', 20))
+        radar_items = etf_service.get_radar_rankings(category=category, limit=limit)
+        return jsonify({
+            'success': True,
+            'category': category,
+            'total_count': len(radar_items),
+            'data': radar_items
+        })
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"获取选品雷达数据失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': '获取选品雷达数据失败'
+        }), 500
+
 @etf_bp.route('/api/etf/basic-info/<etf_code>', methods=['GET'])
 def get_etf_basic_info(etf_code):
     """获取ETF基础信息"""

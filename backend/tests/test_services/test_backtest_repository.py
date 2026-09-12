@@ -112,6 +112,32 @@ class TestBacktestRepository(unittest.TestCase):
         self.assertEqual(res_all['total'], 2)
         self.assertEqual(len(res_all['records']), 2)
 
+    def test_save_run_grid_cash_profit_and_strategy_return(self):
+        """测试使用真实回测引擎的 grid_cash_profit 与 strategy_return 正常入库非 0"""
+        mock_engine_result = {
+            'summary': {
+                'strategy_return': 12.5,
+                'grid_cash_profit': 2888.50,
+                'max_drawdown': 5.2,
+                'total_trades_count': 50
+            },
+            'history_meta': {
+                'actual_calendar_days': 182,
+                'actual_trading_days': 120
+            },
+            'profit_pool': {'free_shares': 200},
+            'equity_curve': [],
+            'total_trades_all': []
+        }
+        run_id = self.repo.save_run('510300', '沪深300ETF', 180, 100000.0, 'atr', 'cash', mock_engine_result)
+        rec = self.repo.list_runs(etf_code='510300', latest_only=False)['records'][0]
+        
+        # 验证做 T 纯利润准确提取
+        self.assertEqual(rec['total_profit'], 2888.50)
+        # 验证科学年化收益率折算 (12.5 * 365 / 182 = 25.07)
+        self.assertAlmostEqual(rec['annual_return'], 25.07, places=1)
+        self.assertEqual(rec['total_trades'], 50)
+
 
 if __name__ == '__main__':
     unittest.main()

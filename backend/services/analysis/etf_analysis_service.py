@@ -18,6 +18,7 @@ from .suitability_analyzer import SuitabilityAnalyzer
 from .grid_calculator import CompositeGridCalculator
 from .backtest_engine import GridBacktestEngine
 from .valuation_engine import ValuationEngine
+from repositories.valuation_repository import ValuationRepository
 from config.constants import ETFConstants
 
 
@@ -53,6 +54,7 @@ class ETFAnalysisService:
         self.composite_grid_calculator = CompositeGridCalculator()
         self.backtest_engine = GridBacktestEngine()
         self.valuation_engine = ValuationEngine(getattr(self.akshare_client, 'cache', None))
+        self.valuation_repo = ValuationRepository()
         
         # 热门ETF列表 (涵盖宽基指数、稳定行业与景气行业核心标的)
         self.popular_etfs = [
@@ -88,6 +90,10 @@ class ETFAnalysisService:
     def get_popular_etfs(self) -> List[Dict]:
         """获取热门ETF列表"""
         return self.popular_etfs
+
+    def get_radar_rankings(self, category: str = "all", limit: int = 20) -> List[Dict]:
+        """获取选品雷达推荐榜单（从 SQLite 存储库查询）"""
+        return self.valuation_repo.query_radar_rankings(category=category, limit=limit)
 
     def get_etf_valuation(self, etf_code: str) -> Dict:
         """获取指定ETF的估值温度计数据"""

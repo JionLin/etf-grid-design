@@ -71,9 +71,67 @@ class BacktestRepository:
                 logger.info(f"BacktestRepository 初始化完成: {self.db_path}")
             finally:
                 conn.close()
+            # 自动自愈修复历史数据
+            self.migrate_fix_zero_metrics()
         except Exception as e:
             logger.error(f"初始化回测数据库失败: {str(e)}")
             raise
+
+    def migrate_fix_zero_metrics(self):
+        """扫描并自愈已有历史快照中因字段错位导致 total_profit 或 annual_return 为 0 的记录"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, summary_json, actual_days 
+                FROM backtest_runs 
+                WHERE total_profit = 0.0 OR annual_return = 0.0
+            """)
+            rows = cursor.fetchall()
+            updates = []
+            for row in rows:
+                rec_id = row["id"]
+                sum_json = row["summary_json"]
+                act_days = row["actual_days"] or 180
+                if not sum_json:
+                    continue
+                try:
+                    s = json.loads(sum_json)
+                    pp = s.get("profit_pool", {})
+                    meta = s.get("history_meta", {})
+                    cal_days = meta.get("actual_calendar_days") or act_days
+
+                    raw_profit = (
+                        s.get("grid_cash_profit") 
+                        if s.get("grid_cash_profit") is not None 
+                        else pp.get("total_profit_accumulated", s.get("total_profit", 0.0))
+                    )
+                    recovered_profit = round(float(raw_profit or 0.0), 2)
+
+                    strat_ret = float(s.get("strategy_return", s.get("total_return", 0.0)))
+                    if "annualized_return" in s:
+                        recovered_annual = float(s["annualized_return"])
+                    elif cal_days > 0 and strat_ret != 0.0:
+                        recovered_annual = round(strat_ret * (365.0 / cal_days), 2)
+                    else:
+                        recovered_annual = round(strat_ret, 2)
+
+                    updates.append((recovered_annual, recovered_profit, rec_id))
+                except Exception:
+                    continue
+
+            if updates:
+                cursor.executemany("""
+                    UPDATE backtest_runs 
+                    SET annual_return = ?, total_profit = ? 
+                    WHERE id = ?
+                """, updates)
+                conn.commit()
+                logger.info(f"成功自愈回测历史档案指标: 共修复 {len(updates)} 条记录")
+        except Exception as e:
+            logger.warning(f"自愈回测历史档案指标失败: {e}")
+        finally:
+            conn.close()
 
     def save_run(
         self,
@@ -92,16 +150,36 @@ class BacktestRepository:
         meta = backtest_result.get("history_meta", {}) or summary.get("history_meta", {})
 
         actual_days = meta.get("actual_trading_days", backtest_days)
+        actual_cal_days = meta.get("actual_calendar_days") or actual_days
         is_partial = 1 if meta.get("is_partial_history") else 0
         partial_reason = meta.get("partial_reason")
 
-        annual_return = float(summary.get("annualized_return", 0.0))
-        max_drawdown = float(summary.get("max_drawdown", 0.0))
-        total_profit = float(summary.get("total_profit", 0.0))
-        total_trades = int(summary.get("total_trades", len(backtest_result.get("total_trades_all", []))))
-        
         profit_pool = backtest_result.get("profit_pool", {}) or summary.get("profit_pool", {})
         free_shares = int(profit_pool.get("free_shares", 0))
+
+        # 1. 真实对齐做 T 纯利润 (优先取 grid_cash_profit 与 total_profit_accumulated)
+        raw_profit = (
+            summary.get("grid_cash_profit")
+            if summary.get("grid_cash_profit") is not None
+            else profit_pool.get("total_profit_accumulated", summary.get("total_profit", 0.0))
+        )
+        total_profit = round(float(raw_profit or 0.0), 2)
+
+        # 2. 真实年化收益率折算
+        strategy_ret = float(summary.get("strategy_return", summary.get("total_return", 0.0)))
+        if "annualized_return" in summary:
+            annual_return = float(summary["annualized_return"])
+        elif actual_cal_days > 0 and strategy_ret != 0.0:
+            annual_return = round(strategy_ret * (365.0 / actual_cal_days), 2)
+        else:
+            annual_return = round(strategy_ret, 2)
+
+        max_drawdown = round(float(summary.get("max_drawdown", 0.0)), 2)
+        total_trades = int(
+            summary.get("total_trades_count")
+            or summary.get("total_trades")
+            or len(backtest_result.get("total_trades_all", []))
+        )
 
         summary_json = json.dumps(summary, ensure_ascii=False)
         equity_curve_json = json.dumps(backtest_result.get("equity_curve", []), ensure_ascii=False)

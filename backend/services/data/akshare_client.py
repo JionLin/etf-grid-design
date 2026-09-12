@@ -5,6 +5,10 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 from .cache_service import EnhancedCache
+try:
+    from repositories.market_data_repository import MarketDataRepository
+except ImportError:
+    from backend.repositories.market_data_repository import MarketDataRepository
 
 logger = logging.getLogger(__name__)
 
@@ -16,16 +20,91 @@ class AkShareClient:
         """初始化AkShare客户端"""
         # 初始化缓存管理器（保持与TushareClient相同的逻辑）
         self.cache = EnhancedCache(cache_dir)
+        self.market_repo = MarketDataRepository()
         
         # A股交易时间配置
         self.market_open_time = "09:30"
         self.market_close_time = "15:00"
         
-        logger.info("AkShare客户端初始化成功（增强缓存版本）")
+        logger.info("AkShare客户端初始化成功（集成 SQLite 时序行情湖版本）")
     
+    def _fetch_raw_kline_network(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
+        """向网络接口请求原始日 K 线（优先 AkShare，网络受阻时走备用分段源）"""
+        clean_code = etf_code.split(".")[0]
+        s_date = start_date.replace("-", "")
+        e_date = end_date.replace("-", "")
+        try:
+            df = ak.fund_etf_hist_em(
+                symbol=clean_code,
+                period="daily",
+                start_date=s_date,
+                end_date=e_date,
+                adjust="qfq"
+            )
+            if df is not None and not df.empty:
+                return self._convert_akshare_daily_to_tushare_format(df)
+        except Exception as e:
+            logger.warning(f"AkShare 接口网络异常，切换备用分段源 ({clean_code}): {e}")
+
+        return self._get_fallback_kline(clean_code, days=days)
+
+    def _sync_and_fill_kline_lake(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
+        """
+        本地日 K 时序数据湖同步与增量自愈管理
+        1. 检查最新端缺口 (Incremental Forward Fill)
+        2. 检查历史端缺口 (Backfill Backward)
+        3. 从本地 SQLite 直出切片
+        """
+        clean_code = etf_code.split(".")[0]
+        norm_start = f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:]}" if len(start_date) == 8 else start_date
+        norm_end = f"{end_date[:4]}-{end_date[4:6]}-{end_date[6:]}" if len(end_date) == 8 else end_date
+        est_target_days = int(days * 242 / 365) if days > 30 else days
+
+        local_range = self.market_repo.get_date_range(clean_code)
+        local_min = local_range["min_date"]
+        local_max = local_range["max_date"]
+        local_count = local_range["total_count"]
+
+        # 场景 A: 本地完全无数据 -> 全量拉取
+        if local_count == 0 or not local_max:
+            logger.info(f"→ 本地日 K 时序库无 {clean_code} 历史，触发初次拉取入库")
+            df = self._fetch_raw_kline_network(clean_code, start_date, end_date, days=days)
+            if df is not None and not df.empty:
+                self.market_repo.save_bars(clean_code, df)
+            return self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end, limit=est_target_days)
+
+        # 场景 B: 最新端缺口比对 (local_max < norm_end)
+        if local_max < norm_end:
+            try:
+                next_day = (datetime.strptime(local_max, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
+                target_end = end_date.replace("-", "")
+                if next_day <= target_end:
+                    inc_days = (datetime.strptime(norm_end, "%Y-%m-%d") - datetime.strptime(local_max, "%Y-%m-%d")).days
+                    logger.info(f"→ 检测到最新端缺口: {clean_code} 本地最新 {local_max} < 目标 {norm_end}，定向增量补齐 ({next_day}~{target_end})")
+                    inc_df = self._fetch_raw_kline_network(clean_code, next_day, target_end, days=max(10, inc_days))
+                    if inc_df is not None and not inc_df.empty:
+                        self.market_repo.save_bars(clean_code, inc_df)
+                        logger.info(f"✓ 成功增量补齐 {len(inc_df)} 条最新日 K 线至本地数据库")
+            except Exception as e:
+                logger.warning(f"增量补齐最新日 K 线失败 ({clean_code}): {e}")
+
+        # 场景 C: 历史端缺口比对 (请求天数超出本地已有历史记录跨度)
+        local_range_now = self.market_repo.get_date_range(clean_code)
+        curr_count = local_range_now["total_count"]
+        curr_min = local_range_now["min_date"]
+        if est_target_days > curr_count and curr_min and curr_min > norm_start:
+            logger.info(f"→ 检测到历史端跨度缺口: 需要 {est_target_days} 交易日，本地仅 {curr_count} 交易日，向前回溯补齐")
+            hist_df = self._get_fallback_kline(clean_code, days=days)
+            if hist_df is not None and not hist_df.empty:
+                self.market_repo.save_bars(clean_code, hist_df)
+
+        # 从本地 SQLite 毫秒级直出最终切片
+        res_df = self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end, limit=est_target_days)
+        return res_df
+
     def get_etf_daily_data(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
         """
-        获取ETF日线数据（历史数据范围缓存）
+        获取ETF日线数据（优先通过本地 SQLite 时序库毫秒级直出，并自动执行双向增量补齐）
         
         Args:
             etf_code: ETF代码（不含市场后缀）
@@ -41,53 +120,24 @@ class AkShareClient:
             logger.info(f"→ 调整结束日期: {end_date} -> {adjusted_end_date} (当天未收盘)")
             end_date = adjusted_end_date
         
-        # 1. 先检查历史数据缓存
-        cached_data = self.cache.get_historical_cache(etf_code, start_date, end_date)
-        if cached_data:
-            logger.info(f"✓ 从历史缓存获取ETF {etf_code} 日线数据 ({start_date}~{end_date})")
-            # 将缓存的字典数据转换回DataFrame
-            df = pd.DataFrame(cached_data)
-            # 确保trade_date是datetime类型
-            df['trade_date'] = pd.to_datetime(df['trade_date'])
-            return df
-        
-        # 2. 缓存未命中，调用AkShare接口
-        logger.info(f"→ 历史缓存未命中，请求AkShare接口获取ETF {etf_code} 日线数据 ({start_date}~{end_date})")
-        
         try:
-            
-            # 调用AkShare接口获取ETF历史数据
-            df = ak.fund_etf_hist_em(
-                symbol=etf_code,
-                period="daily",
-                start_date=start_date,
-                end_date=end_date,
-                adjust="qfq"
-            )
-            
-            if df.empty:
-                logger.warning(f"✗ AkShare接口返回空数据，ETF {etf_code} 日线数据获取失败")
-                return None
-            
-            # 数据预处理和格式转换
-            df = self._convert_akshare_daily_to_tushare_format(df)
-            
-            # 3. 成功获取数据，保存到历史缓存（转换为字典格式）
-            cache_data = df.to_dict('records')
-            self.cache.set_historical_cache(etf_code, start_date, end_date, cache_data)
-            logger.info(f"✓ ETF {etf_code} 日线数据获取成功并已缓存，共{len(df)}条记录")
-            
-            return df
-            
+            # 1. 优先通过本地 SQLite 时序数据湖同步并提取
+            lake_df = self._sync_and_fill_kline_lake(etf_code, start_date, end_date, days=days)
+            if lake_df is not None and not lake_df.empty:
+                return lake_df
         except Exception as e:
-            logger.error(f"✗ 请求AkShare接口失败，ETF {etf_code} 日线数据获取失败: {str(e)}")
-            df = self._get_fallback_kline(etf_code, days=days)
-            if df is not None and not df.empty:
-                cache_data = df.to_dict('records')
-                self.cache.set_historical_cache(etf_code, start_date, end_date, cache_data)
-                logger.info(f"✓ 通过备用源获取ETF {etf_code} 日线数据成功，共{len(df)}条记录")
-                return df
-            return None
+            logger.warning(f"时序库处理异常，回退传统链路 ({etf_code}): {e}")
+
+        # 2. 兜底回退：备用分段源
+        fallback_df = self._get_fallback_kline(etf_code, days=days)
+        if fallback_df is not None and not fallback_df.empty:
+            try:
+                self.market_repo.save_bars(etf_code, fallback_df)
+            except Exception:
+                pass
+            return fallback_df
+
+        return None
     
     def get_etf_basic_info(self, etf_code: str) -> Optional[Dict]:
         """
@@ -687,19 +737,61 @@ class AkShareClient:
             return None
 
     def _get_fallback_kline(self, etf_code: str, days: int = 180) -> Optional[pd.DataFrame]:
-        """备用K线源 (腾讯财经)"""
+        """备用K线源 (腾讯财经) - 支持向前多轮分段拉取合并"""
         try:
             import requests
             code = etf_code.split('.')[0]
             prefix = 'sh' if code.startswith(('5', '6')) else 'sz'
-            url = f'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},day,,,{days},qfq'
-            res = requests.get(url, timeout=5).json()
-            item = res.get('data', {}).get(f'{prefix}{code}', {})
-            raw_data = item.get('qfqday', item.get('day', []))
-            if not raw_data:
+            
+            # 换算目标交易日数 (A股通常1年242~250个交易日)
+            est_target_days = int(days * 250 / 365) if days > 30 else days
+            
+            session = requests.Session()
+            session.trust_env = False  # 避免本地代理环境干扰
+            
+            all_raw_data = []
+            current_end = ""
+            chunk_size = 640
+            max_loops = 5  # 最多拉取5轮 (可达3000+交易日，超12年)
+            
+            for _ in range(max_loops):
+                if not current_end:
+                    url = f'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},day,,,{chunk_size},qfq'
+                else:
+                    url = f'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param={prefix}{code},day,2015-01-01,{current_end},{chunk_size},qfq'
+                
+                res = session.get(url, timeout=6).json()
+                item = res.get('data', {}).get(f'{prefix}{code}', {})
+                raw_data = item.get('qfqday', item.get('day', []))
+                if not raw_data:
+                    break
+                
+                # 若是向前拉取，raw_data 的最后一条与 current_end 日期重合，去重
+                if current_end and raw_data and raw_data[-1][0] == current_end:
+                    raw_data = raw_data[:-1]
+                
+                if not raw_data:
+                    break
+                
+                all_raw_data = raw_data + all_raw_data
+                earliest_date = raw_data[0][0]
+                if earliest_date == current_end:
+                    break
+                current_end = earliest_date
+                
+                # 若已满足目标交易日数，或单批返回明显少于 640 (触及上市首日)，结束循环
+                if len(all_raw_data) >= est_target_days or len(raw_data) < chunk_size - 10:
+                    break
+            
+            if not all_raw_data:
                 return None
+            
+            # 若合并结果超出目标交易日数，取最近的 est_target_days 条
+            if len(all_raw_data) > est_target_days:
+                all_raw_data = all_raw_data[-est_target_days:]
+            
             records = []
-            for row in raw_data:
+            for row in all_raw_data:
                 o_price = float(row[1])
                 c_price = float(row[2])
                 h_price = float(row[3])
@@ -718,7 +810,8 @@ class AkShareClient:
                     'amount': calc_amount,
                     'pct_chg': round((c_price - o_price) / o_price * 100, 2) if o_price > 0 else 0.0
                 })
-            return pd.DataFrame(records)
+            df = pd.DataFrame(records)
+            return df.sort_values('trade_date').reset_index(drop=True)
         except Exception as e:
             logger.warning(f"备用K线获取失败: {str(e)}")
             return None
