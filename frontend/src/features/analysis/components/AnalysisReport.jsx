@@ -8,6 +8,7 @@ import Disclaimer from "./Disclaimer";
 import SuitabilityCard from "./ReportCards/SuitabilityCard";
 import GridParametersCard from "./ReportCards/GridParametersCard";
 import BacktestCard from "./ReportCards/BacktestCard";
+import BacktestArchiveView from "./ReportCards/BacktestArchiveView";
 import ValuationGaugeCard from "./ReportCards/ValuationGaugeCard";
 
 /**
@@ -243,6 +244,11 @@ const AnalysisReport = ({
               dataQuality={data_quality}
               showDetailed={true}
             />
+          )}
+
+          {/* 回测档案库标签页 */}
+          {activeTab === "archive" && (
+            <BacktestArchiveView />
           )}
         </div>
       </div>

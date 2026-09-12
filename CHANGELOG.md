@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-12
+### :sparkles: Major Features (5年大周期长时序回测与本地 SQLite 策略档案库)
+- **5年跨牛熊大周期回测**: 将回测历史跨度从原本的 90/180/365 天扩展至 730天（2年）、1095天（3年）与 1825天（5年康波/牛熊大周期），并支持次新 ETF 上市时间平滑自适应与审计元数据回传。
+- **多轨全量撮合流水透视**: 废除前端 `trades[-50:]` 50 笔生硬截断，基于 `total_trades_all` 展现选定周期内全部做 T 明细；首创【全部 / 小网 / 中网 / 大网】分轨独立筛选，动态联动成交笔数、落袋净利与单笔均利统计。
+- **本地 SQLite 策略档案库**: 后端基于 Python 原生 `sqlite3`（WAL 读写分离模式）实现零依赖存储库 `BacktestRepository`，自动归档每次回测快照，提供档案检索、详情还原与删除 API。
+- **前端首页第 5 个 Tab【回测档案库】**: 在 `ReportTabs` 新增档案库标签页，支持按标的与周期筛选历史测算，免重算即时还原当次净值曲线与交易流水明细。
+- **交易流水 CSV 本地导出**: 流水表格支持每页 20/50/100 笔客户端无卡顿分页，并支持一键将当前筛选轨道及周期的全量流水导出为 CSV 文件。
+
 ## [0.4.0] - 2026-09-12
 ### :sparkles: Major Features (量化状态机回测与 10 年官方估值标尺)
 - **10年官方估值标尺**: 建立全市场核心基准指数 10 年滚动 PE-TTM、PB 与股息率 (D/P) 历史百分位标尺与五档安全边际温度计，将跟踪池扩充至 117+ 只高流动性主流宽基与高景气行业 ETF。
@@ -13,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### :zap: Architecture & Enhancements
 - **复合阶梯唯一事实源**: 彻底废除顶层独立 ATR 计算逻辑，重构以 `composite_grid` 为唯一事实源（Single Source of Truth），实现价格区间上下界、看板核心主步长、总档位数与用户所选“步长生成模式”100% 动态自洽联动。
 - **真实量化资金账本**: 坚决杜绝死板假兜底，实打实输出底仓实际建仓占用、网格流动现金池、100股向下取整机动零钱结余（`reserve_amount`）、99%+ 真实资金利用率、以及小网第 1 档单笔委托股数与单笔预期收益。
-- **多层文档体系同步**: 系统性同步 `README.md` 门面亮点卡片、`docs/STRATEGY_MANUAL.md` 策略白皮书数学推导、以及本版本更新流水。
+- **多层文档体系同步**: 系统性同步 `README.md` 门面亮点卡片与架构清单、在 `docs/STRATEGY_MANUAL.md` 策略白皮书中新增【第八章：标的量化体检与 4 维适宜度评估模型】（形式化推导 15%~45% 黄金年化波动率与 ADX < 20 震荡市判据）、以及本版本发布流水。
 
 ### :bug: Bug Fixes
 - **白屏异常修复**: 修复因 `fund_allocation` 字段缺失导致前端调用 `formatCurrency(undefined)` 抛出未捕获异常引发的整页白屏崩溃。

@@ -64,6 +64,15 @@ class ApiService {
   }
 
   /**
+   * DELETE请求
+   */
+  async delete(endpoint) {
+    return this.request(endpoint, {
+      method: "DELETE",
+    });
+  }
+
+  /**
    * ETF分析主接口
    */
   async analyzeETF(parameters) {
@@ -129,6 +138,34 @@ class ApiService {
   async getVersion() {
     return this.get("/version");
   }
+
+  /**
+   * 获取回测档案列表
+   */
+  async getBacktestRecords(params = {}) {
+    return this.get("/backtest/records", params);
+  }
+
+  /**
+   * 获取单次回测档案快照详情
+   */
+  async getBacktestRecordDetail(runId) {
+    return this.get(`/backtest/records/${runId}`);
+  }
+
+  /**
+   * 删除某次回测档案
+   */
+  async deleteBacktestRecord(runId) {
+    return this.delete(`/backtest/records/${runId}`);
+  }
+
+  /**
+   * 获取档案库已测试标的列表
+   */
+  async getBacktestDistinctETFs() {
+    return this.get("/backtest/distinct-etfs");
+  }
 }
 
 // 创建单例实例
@@ -145,5 +182,9 @@ export const getHistoricalData = (etfCode, startDate, endDate) =>
   apiService.getHistoricalData(etfCode, startDate, endDate);
 export const healthCheck = () => apiService.healthCheck();
 export const getVersion = () => apiService.getVersion();
+export const getBacktestRecords = (params) => apiService.getBacktestRecords(params);
+export const getBacktestRecordDetail = (runId) => apiService.getBacktestRecordDetail(runId);
+export const deleteBacktestRecord = (runId) => apiService.deleteBacktestRecord(runId);
+export const getBacktestDistinctETFs = () => apiService.getBacktestDistinctETFs();
 
 export default apiService;

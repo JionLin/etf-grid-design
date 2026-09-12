@@ -1,5 +1,5 @@
 import React from "react";
-import { Eye, ThermometerSun, Grid3X3, TrendingUp } from "lucide-react";
+import { Eye, ThermometerSun, Grid3X3, TrendingUp, Database } from "lucide-react";
 
 /**
  * 报告标签页导航组件
@@ -22,6 +22,11 @@ export default function ReportTabs({ activeTab, onTabChange }) {
       id: "suitability",
       label: "标的体检报告",
       icon: <ThermometerSun className="w-4 h-4" />,
+    },
+    {
+      id: "archive",
+      label: "回测档案库",
+      icon: <Database className="w-4 h-4" />,
     },
   ];
 

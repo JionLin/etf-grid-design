@@ -6,10 +6,12 @@
 from flask import Blueprint, request, jsonify
 import traceback
 from services.analysis.etf_analysis_service import ETFAnalysisService
+from repositories.backtest_repository import BacktestRepository
 
 # 创建分析蓝图
 analysis_bp = Blueprint('analysis', __name__)
 etf_service = ETFAnalysisService()
+backtest_repo = BacktestRepository()
 
 @analysis_bp.route('/api/analyze', methods=['POST'])
 def analyze_etf_strategy():
@@ -179,6 +181,7 @@ def run_backtest():
 
         total_capital = float(data.get('totalCapital', data.get('total_capital', 100000)))
         backtest_days = int(data.get('backtestDays', data.get('backtest_days', 180)))
+        backtest_days = max(30, min(1825, backtest_days))
         adjustment_coefficient = float(data.get('adjustmentCoefficient', 1.0))
         scaling_ratio = float(data.get('scalingRatio', data.get('scaling_ratio', 0.0)))
         reinvest_mode = str(data.get('reinvestMode', data.get('reinvest_mode', 'cash')))
@@ -230,6 +233,27 @@ def run_backtest():
             eda_step_ratios=eda_step_ratios,
         )
 
+        # 自动归档至本地 SQLite 回测档案库
+        try:
+            etf_info = etf_service.get_etf_basic_info(etf_code) or {}
+            etf_name = etf_info.get('name', etf_code)
+            run_id = backtest_repo.save_run(
+                etf_code=etf_code,
+                etf_name=etf_name,
+                backtest_days=backtest_days,
+                total_capital=total_capital,
+                step_mode=step_mode,
+                reinvest_mode=reinvest_mode,
+                backtest_result=result,
+                params=data,
+            )
+            result['run_id'] = run_id
+            if 'summary' in result and isinstance(result['summary'], dict):
+                result['summary']['run_id'] = run_id
+        except Exception as repo_err:
+            from flask import current_app
+            current_app.logger.warning(f"自动保存回测档案失败 (非阻塞): {str(repo_err)}")
+
         return jsonify({'success': True, 'data': result})
     except ValueError as e:
         return jsonify({'success': False, 'error': str(e)}), 400
@@ -238,6 +262,61 @@ def run_backtest():
         current_app.logger.error(f"策略回测失败: {str(e)}")
         current_app.logger.error(traceback.format_exc())
         return jsonify({'success': False, 'error': f"回测计算异常: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/backtest/records', methods=['GET'])
+def get_backtest_records():
+    """获取历史回测档案列表 (支持按标的和周期筛选)"""
+    try:
+        etf_code = request.args.get('etfCode') or request.args.get('etf_code')
+        days = request.args.get('days')
+        days_int = int(days) if days and days.isdigit() else None
+        limit = int(request.args.get('limit', 50))
+        offset = int(request.args.get('offset', 0))
+
+        records_data = backtest_repo.list_runs(
+            etf_code=etf_code,
+            days=days_int,
+            limit=limit,
+            offset=offset,
+        )
+        return jsonify({'success': True, 'data': records_data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"获取回测档案列表失败: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/backtest/records/<run_id>', methods=['GET'])
+def get_backtest_record_detail(run_id: str):
+    """获取单次回测档案完整快照 (无需重算即时还原)"""
+    try:
+        record = backtest_repo.get_run_detail(run_id)
+        if not record:
+            return jsonify({'success': False, 'error': '未找到该回测档案'}), 404
+        return jsonify({'success': True, 'data': record})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"读取回测明细失败: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/backtest/records/<run_id>', methods=['DELETE'])
+def delete_backtest_record(run_id: str):
+    """删除指定回测档案"""
+    try:
+        success = backtest_repo.delete_run(run_id)
+        if not success:
+            return jsonify({'success': False, 'error': '回测记录不存在或已删除'}), 404
+        return jsonify({'success': True, 'message': '删除成功'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"删除回测档案失败: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/backtest/distinct-etfs', methods=['GET'])
+def get_distinct_etfs_in_records():
+    """获取回测档案库中所有测试过的 ETF 标的列表"""
+    try:
+        etfs = backtest_repo.get_distinct_etfs()
+        return jsonify({'success': True, 'data': etfs})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"获取标的列表失败: {str(e)}"}), 500
 
 
 @analysis_bp.route('/api/literature/eda-grid', methods=['GET'])

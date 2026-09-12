@@ -15,6 +15,9 @@ import {
   Sparkles,
   Sliders,
   PiggyBank,
+  Download,
+  Filter,
+  Layers,
 } from "lucide-react";
 import { runBacktest } from "@shared/services/api";
 
@@ -34,6 +37,9 @@ const BacktestCard = ({
   const [error, setError] = useState(null);
   const [backtestData, setBacktestData] = useState(null);
   const [showAllTrades, setShowAllTrades] = useState(false);
+  const [selectedRail, setSelectedRail] = useState("all");
+  const [pageSize, setPageSize] = useState(20);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // 加载回测数据
   const fetchBacktest = async (days) => {
@@ -73,7 +79,67 @@ const BacktestCard = ({
   const profitPool = backtestData?.profit_pool || summary?.profit_pool;
   const railAttribution = backtestData?.rail_attribution || [];
   const equityCurve = backtestData?.equity_curve || [];
-  const trades = backtestData?.recent_trades || [];
+  const allTrades = backtestData?.total_trades_all || backtestData?.recent_trades || [];
+
+  // 分轨过滤
+  const filteredTrades = useMemo(() => {
+    if (selectedRail === "all") return allTrades;
+    return allTrades.filter((t) => t.rail === selectedRail);
+  }, [allTrades, selectedRail]);
+
+  // 分轨专项统计
+  const railStatsSummary = useMemo(() => {
+    const totalCount = filteredTrades.length;
+    const buyCount = filteredTrades.filter((t) => t.action === "BUY").length;
+    const sellCount = filteredTrades.filter((t) => t.action === "SELL").length;
+    const totalProfit = filteredTrades.reduce((acc, t) => acc + (Number(t.profit) || 0), 0);
+    const avgProfitPerSell = sellCount > 0 ? (totalProfit / sellCount).toFixed(2) : "0.00";
+    return {
+      totalCount,
+      buyCount,
+      sellCount,
+      totalProfit: totalProfit.toFixed(2),
+      avgProfitPerSell,
+    };
+  }, [filteredTrades]);
+
+  // 分页计算
+  const totalPages = Math.max(1, Math.ceil(filteredTrades.length / pageSize));
+  const paginatedTrades = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredTrades.slice(start, start + pageSize);
+  }, [filteredTrades, currentPage, pageSize]);
+
+  // 轨道切换时重置当前页码
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedRail, backtestDays]);
+
+  // 导出 CSV
+  const handleExportCsv = () => {
+    if (!filteredTrades.length) return;
+    const headers = ["成交时间", "动作", "轨道", "成交价格(元)", "成交股数", "成交金额(元)", "手续费(元)", "扣费净利(元)"];
+    const rows = filteredTrades.map((t) => [
+      t.trade_time,
+      t.action_label || (t.action === "SELL" ? "卖出" : "买入"),
+      t.rail_name || t.rail,
+      Number(t.price).toFixed(3),
+      t.shares,
+      t.amount,
+      t.fee,
+      t.action === "SELL" ? t.profit : "0.00",
+    ]);
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `ETF_${etfCode}_回测流水_${selectedRail}_${backtestDays}天.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   // 计算 SVG 净值图表坐标点
   const chartPoints = useMemo(() => {
@@ -181,50 +247,41 @@ const BacktestCard = ({
                 </span>
               )}
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">
-              回测期间：{summary?.start_date || "..."} 至 {summary?.end_date || "..."}（共 {summary?.backtest_days || 0} 个有效交易日）
+            <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
+              <span>回测期间：{summary?.start_date || "..."} 至 {summary?.end_date || "..."}（共 {summary?.backtest_days || 0} 个有效交易日）</span>
+              {summary?.history_meta?.is_partial_history && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                  ⚠️ {summary.history_meta.partial_reason}
+                </span>
+              )}
             </p>
           </div>
         </div>
 
         {/* 周期切换胶囊 */}
-        <div className="flex items-center gap-1.5 bg-gray-100/90 p-1 rounded-xl self-start sm:self-auto text-xs">
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => setBacktestDays(90)}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-              backtestDays === 90
-                ? "bg-white text-blue-700 font-bold shadow-xs"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            90 天 (近一季)
-          </button>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => setBacktestDays(180)}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-              backtestDays === 180
-                ? "bg-white text-blue-700 font-bold shadow-xs"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            ★ 180 天 (半年 · 默认)
-          </button>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => setBacktestDays(365)}
-            className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-              backtestDays === 365
-                ? "bg-white text-blue-700 font-bold shadow-xs"
-                : "text-gray-600 hover:text-gray-900"
-            }`}
-          >
-            365 天 (年度防守)
-          </button>
+        <div className="flex flex-wrap items-center gap-1.5 bg-gray-100/90 p-1 rounded-xl self-start sm:self-auto text-xs">
+          {[
+            { days: 90, label: "90 天" },
+            { days: 180, label: "180 天 (默认)" },
+            { days: 365, label: "1 年" },
+            { days: 730, label: "2 年" },
+            { days: 1095, label: "3 年" },
+            { days: 1825, label: "5 年 (牛熊)" },
+          ].map((item) => (
+            <button
+              key={item.days}
+              type="button"
+              disabled={loading}
+              onClick={() => setBacktestDays(item.days)}
+              className={`px-2.5 py-1.5 rounded-lg font-medium transition-all ${
+                backtestDays === item.days
+                  ? "bg-white text-blue-700 font-bold shadow-xs"
+                  : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -544,7 +601,17 @@ const BacktestCard = ({
               onClick={() => setShowAllTrades(!showAllTrades)}
               className="w-full py-3 px-5 bg-gray-50 flex items-center justify-between text-xs font-bold text-gray-700 hover:bg-gray-100 transition-colors"
             >
-              <span>回测撮合交易流水明细（最近 {trades.length} 笔）</span>
+              <span className="flex items-center gap-2">
+                <span>回测撮合交易流水明细</span>
+                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-mono">
+                  共 {allTrades.length} 笔
+                </span>
+                {selectedRail !== "all" && (
+                  <span className="text-gray-400 font-normal">
+                    (当前筛选: {filteredTrades.length} 笔)
+                  </span>
+                )}
+              </span>
               <span className="flex items-center gap-1 text-blue-600">
                 {showAllTrades ? "收起明细" : "展开明细"}
                 {showAllTrades ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -552,50 +619,170 @@ const BacktestCard = ({
             </button>
 
             {showAllTrades && (
-              <div className="overflow-x-auto max-h-72">
-                <table className="w-full text-left text-xs border-collapse font-mono">
-                  <thead className="bg-gray-50/80 sticky top-0 border-b border-gray-200 text-gray-500">
-                    <tr>
-                      <th className="py-2 px-4 font-semibold">成交时间</th>
-                      <th className="py-2 px-4 font-semibold">动作</th>
-                      <th className="py-2 px-4 font-semibold">轨道</th>
-                      <th className="py-2 px-4 font-semibold">成交价格</th>
-                      <th className="py-2 px-4 font-semibold">股数</th>
-                      <th className="py-2 px-4 font-semibold">成交金额</th>
-                      <th className="py-2 px-4 font-semibold">手续费</th>
-                      <th className="py-2 px-4 font-semibold">预估获利</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {trades.map((t, idx) => (
-                      <tr key={idx} className="hover:bg-gray-50">
-                        <td className="py-2 px-4 text-gray-500">{t.trade_time}</td>
-                        <td className="py-2 px-4">
-                          <span
-                            className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-bold font-sans ${
-                              t.action === "SELL"
-                                ? "bg-red-100 text-red-800"
-                                : "bg-emerald-100 text-emerald-800"
-                            }`}
-                          >
-                            {t.action === "SELL" ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
-                            {t.action_label}
-                          </span>
-                        </td>
-                        <td className="py-2 px-4">
-                          <span className="text-gray-700 font-sans font-medium">{t.rail_name}</span>
-                        </td>
-                        <td className="py-2 px-4 font-bold text-gray-900">¥{Number(t.price).toFixed(3)}</td>
-                        <td className="py-2 px-4">{t.shares?.toLocaleString()} 股</td>
-                        <td className="py-2 px-4">¥{t.amount?.toLocaleString()}</td>
-                        <td className="py-2 px-4 text-gray-400">¥{t.fee}</td>
-                        <td className="py-2 px-4 font-bold text-red-600 font-sans">
-                          {t.action === "SELL" ? `+¥${t.profit}` : "-"}
-                        </td>
-                      </tr>
+              <div className="p-4 space-y-3 bg-white">
+                {/* 筛选与操作控制条 */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50/80 p-3 rounded-xl border border-gray-100">
+                  {/* 分轨选择胶囊 */}
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <span className="text-gray-500 font-medium mr-1 flex items-center gap-1">
+                      <Filter className="w-3.5 h-3.5" /> 轨道筛选:
+                    </span>
+                    {[
+                      { id: "all", label: `全部 (${allTrades.length})` },
+                      { id: "small", label: `小网 (${allTrades.filter((t) => t.rail === "small").length})` },
+                      { id: "medium", label: `中网 (${allTrades.filter((t) => t.rail === "medium").length})` },
+                      { id: "large", label: `大网 (${allTrades.filter((t) => t.rail === "large").length})` },
+                    ].map((rail) => (
+                      <button
+                        key={rail.id}
+                        type="button"
+                        onClick={() => setSelectedRail(rail.id)}
+                        className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                          selectedRail === rail.id
+                            ? "bg-white text-blue-700 font-bold shadow-xs border border-gray-200"
+                            : "text-gray-600 hover:text-gray-900"
+                        }`}
+                      >
+                        {rail.label}
+                      </button>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+
+                  {/* 导出与分页容量控制 */}
+                  <div className="flex items-center gap-2 self-end sm:self-auto text-xs">
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      className="px-2 py-1 bg-white border border-gray-200 rounded-lg text-gray-700 text-xs focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value={20}>每页 20 笔</option>
+                      <option value={50}>每页 50 笔</option>
+                      <option value={100}>每页 100 笔</option>
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={handleExportCsv}
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-100 transition-colors shadow-2xs"
+                    >
+                      <Download className="w-3.5 h-3.5 text-gray-600" />
+                      导出 CSV
+                    </button>
+                  </div>
+                </div>
+
+                {/* 选中轨道专属统计面板 */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-blue-50/40 p-3 rounded-lg border border-blue-100 text-xs font-mono">
+                  <div>
+                    <span className="text-gray-500">轨道成交: </span>
+                    <span className="font-bold text-gray-900">{railStatsSummary.totalCount} 笔</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">买入/卖出: </span>
+                    <span className="text-emerald-700 font-semibold">{railStatsSummary.buyCount}买</span>
+                    <span className="text-gray-400"> / </span>
+                    <span className="text-red-700 font-semibold">{railStatsSummary.sellCount}卖</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">贡献净利: </span>
+                    <span className="font-bold text-red-600">+¥{railStatsSummary.totalProfit}</span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500">单笔均利: </span>
+                    <span className="font-bold text-gray-900">+¥{railStatsSummary.avgProfitPerSell}</span>
+                  </div>
+                </div>
+
+                {/* 交易流水表格 */}
+                <div className="overflow-x-auto max-h-80 border border-gray-200 rounded-lg">
+                  <table className="w-full text-left text-xs border-collapse font-mono">
+                    <thead className="bg-gray-50/90 sticky top-0 border-b border-gray-200 text-gray-500">
+                      <tr>
+                        <th className="py-2.5 px-4 font-semibold">成交时间</th>
+                        <th className="py-2.5 px-4 font-semibold">动作</th>
+                        <th className="py-2.5 px-4 font-semibold">轨道</th>
+                        <th className="py-2.5 px-4 font-semibold">成交价格</th>
+                        <th className="py-2.5 px-4 font-semibold">股数</th>
+                        <th className="py-2.5 px-4 font-semibold">成交金额</th>
+                        <th className="py-2.5 px-4 font-semibold">手续费</th>
+                        <th className="py-2.5 px-4 font-semibold">落袋净利</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {paginatedTrades.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-6 text-center text-gray-400">
+                            该轨道暂无成交记录
+                          </td>
+                        </tr>
+                      ) : (
+                        paginatedTrades.map((t, idx) => (
+                          <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                            <td className="py-2 px-4 text-gray-500">{t.trade_time}</td>
+                            <td className="py-2 px-4">
+                              <span
+                                className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-bold font-sans ${
+                                  t.action === "SELL"
+                                    ? "bg-red-100 text-red-800"
+                                    : "bg-emerald-100 text-emerald-800"
+                                }`}
+                              >
+                                {t.action === "SELL" ? (
+                                  <ArrowUpRight className="w-3 h-3" />
+                                ) : (
+                                  <ArrowDownRight className="w-3 h-3" />
+                                )}
+                                {t.action_label}
+                              </span>
+                            </td>
+                            <td className="py-2 px-4">
+                              <span className="text-gray-700 font-sans font-medium">{t.rail_name}</span>
+                            </td>
+                            <td className="py-2 px-4 font-bold text-gray-900">¥{Number(t.price).toFixed(3)}</td>
+                            <td className="py-2 px-4">{t.shares?.toLocaleString()} 股</td>
+                            <td className="py-2 px-4">¥{t.amount?.toLocaleString()}</td>
+                            <td className="py-2 px-4 text-gray-400">¥{t.fee}</td>
+                            <td className="py-2 px-4 font-bold text-red-600 font-sans">
+                              {t.action === "SELL" ? `+¥${t.profit}` : "-"}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* 分页控制栏 */}
+                <div className="flex items-center justify-between text-xs text-gray-500 pt-1">
+                  <div>
+                    显示第 {(currentPage - 1) * pageSize + 1} -{" "}
+                    {Math.min(currentPage * pageSize, filteredTrades.length)} 笔，共 {filteredTrades.length} 笔
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={currentPage <= 1}
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      className="px-2.5 py-1 rounded border border-gray-200 bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 font-medium"
+                    >
+                      上一页
+                    </button>
+                    <span className="font-mono">
+                      {currentPage} / {totalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={currentPage >= totalPages}
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      className="px-2.5 py-1 rounded border border-gray-200 bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 font-medium"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
           </div>

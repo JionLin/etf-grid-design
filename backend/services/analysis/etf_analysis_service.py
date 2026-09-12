@@ -626,9 +626,21 @@ class ETFAnalysisService:
             回测报告
         """
         try:
-            df = self.get_historical_data(etf_code, days=backtest_days)
+            safe_days = max(30, min(1825, int(backtest_days)))
+            df = self.get_historical_data(etf_code, days=safe_days)
             if df is None or df.empty:
                 raise ValueError(f"无法获取 ETF {etf_code} 历史行情数据")
+
+            actual_trading_days = len(df)
+            date_col = 'date' if 'date' in df.columns else 'trade_date'
+            first_date = pd.to_datetime(df.iloc[0][date_col])
+            last_date = pd.to_datetime(df.iloc[-1][date_col])
+            actual_calendar_days = (last_date - first_date).days
+            start_date_str = first_date.strftime('%Y-%m-%d')
+            end_date_str = last_date.strftime('%Y-%m-%d')
+
+            # 次新标的自适应判定：标的上市跨度明显少于请求周期（首尾日历跨度不足 70% 且交易日数不足 50%）
+            is_partial_history = (actual_calendar_days < int(safe_days * 0.70)) and (actual_trading_days < int(safe_days * 0.50))
 
             current_price = float(df.iloc[-1]['close'])
             etf_info = self.get_etf_basic_info(etf_code) or {'code': etf_code, 'name': etf_code}
@@ -648,13 +660,28 @@ class ETFAnalysisService:
             # 自动识别交易制度
             trade_mode = "t0" if ETFConstants.is_t0_etf(etf_code) else "t1"
 
-            return self.backtest_engine.run_backtest(
+            backtest_res = self.backtest_engine.run_backtest(
                 daily_df=df,
                 total_capital=total_capital,
                 composite_grid=composite_grid,
                 reinvest_mode=reinvest_mode,
                 trade_mode=trade_mode,
             )
+
+            history_meta = {
+                'requested_days': safe_days,
+                'actual_trading_days': actual_trading_days,
+                'actual_calendar_days': actual_calendar_days,
+                'start_date': start_date_str,
+                'end_date': end_date_str,
+                'is_partial_history': is_partial_history,
+                'partial_reason': f"标的上市仅 {actual_calendar_days} 天（共 {actual_trading_days} 交易日），已自适应回测全量可用历史" if is_partial_history else None,
+            }
+            backtest_res['history_meta'] = history_meta
+            if 'summary' in backtest_res and isinstance(backtest_res['summary'], dict):
+                backtest_res['summary']['history_meta'] = history_meta
+
+            return backtest_res
         except Exception as e:
             logger.error(f"策略历史回测执行失败: {str(e)}")
             raise
