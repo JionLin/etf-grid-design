@@ -78,7 +78,8 @@ class GridOptimizer:
     def calculate_composite_steps(self, current_price: float, atr_ratio: float, 
                                   adjustment_coefficient: float = 1.0,
                                   step_mode: str = 'atr',
-                                  eda_step_ratios: Optional[Dict[str, float]] = None) -> Dict[str, Dict[str, Any]]:
+                                  eda_step_ratios: Optional[Dict[str, float]] = None,
+                                  atr_multipliers: Optional[Dict[str, float]] = None) -> Dict[str, Dict[str, Any]]:
         """
         计算大中小三层复合网格的自适应步长与资金配置
 
@@ -88,6 +89,7 @@ class GridOptimizer:
             adjustment_coefficient: 调节系数
             step_mode: 步长模式 ('atr' 默认ATR自适应 | 'fixed_eda' E大原版固定大步长 5%/15%/30%)
             eda_step_ratios: E大原版模式下的自定义各轨步长比例 (字典: {'small': float, 'medium': float, 'large': float})
+            atr_multipliers: ATR模式下的自定义各轨乘数 (字典: {'small': float, 'medium': float, 'large': float})
 
         Returns:
             Dict包含 small, medium, large 的步长、资金比例与档位数
@@ -136,13 +138,25 @@ class GridOptimizer:
                         except (ValueError, TypeError):
                             pass
 
+            custom_atr_mults = {}
+            if atr_multipliers and isinstance(atr_multipliers, dict):
+                for rail_key in ['small', 'medium', 'large']:
+                    if rail_key in atr_multipliers and atr_multipliers[rail_key] is not None:
+                        try:
+                            m_val = float(atr_multipliers[rail_key])
+                            if 0.1 <= m_val <= 10.0:
+                                custom_atr_mults[rail_key] = m_val
+                        except (ValueError, TypeError):
+                            pass
+
             result = {}
             for rail, conf in config_template.items():
                 if step_mode == 'fixed_eda':
                     step_ratio = eda_fixed_ratios.get(rail, 0.05)
                     multiplier = round(step_ratio / max(0.001, atr_ratio), 2)
                 else:
-                    multiplier = conf['base_multiplier'] * adjustment_coefficient
+                    base_m = custom_atr_mults.get(rail, conf['base_multiplier'])
+                    multiplier = base_m * adjustment_coefficient
                     step_ratio = atr_ratio * multiplier
 
                 # 约束合理范围 (0.2% - 50%，放宽上限以容纳自定义高达 50% 的大网)

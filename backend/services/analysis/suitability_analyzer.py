@@ -110,18 +110,28 @@ class SuitabilityAnalyzer:
             logger.error(f"波动率评估失败: {str(e)}")
             return self._get_error_result(30, "波动率评估")
     
-    def evaluate_market_characteristics(self, adx_value: float) -> Dict:
+    def evaluate_market_characteristics(self, adx_value: Optional[float]) -> Dict:
         """
         市场特征评估（25分）
         基于ADX指数判断趋势/震荡特征
         
         Args:
-            adx_value: ADX指数值
+            adx_value: ADX指数值；样本不足时为空
             
         Returns:
             市场特征评估结果
         """
         try:
+            if adx_value is None or not np.isfinite(adx_value):
+                return {
+                    'score': 0,
+                    'max_score': 25,
+                    'level': '数据不足',
+                    'description': '历史样本不足，无法评估市场特征',
+                    'adx_value': None,
+                    'market_type': '未知',
+                    'details': '历史样本不足28个交易日，无法计算ADX'
+                }
             if adx_value < 20:
                 score = 25
                 level = "震荡市"
@@ -276,14 +286,13 @@ class SuitabilityAnalyzer:
                 'completeness_desc': '无法评估数据完整性'
             }
     
-    def comprehensive_evaluation(self, df: pd.DataFrame, etf_info: Dict, valuation_info: Optional[Dict] = None) -> Dict:
+    def comprehensive_evaluation(self, df: pd.DataFrame, etf_info: Dict) -> Dict:
         """
         综合适宜度评估
         
         Args:
             df: 历史数据DataFrame
             etf_info: ETF基础信息
-            valuation_info: 估值分析信息(可选)
             
         Returns:
             综合评估结果
@@ -331,14 +340,12 @@ class SuitabilityAnalyzer:
                 recommendation = "该标的不推荐进行网格交易"
                 risk_level = "高"
             
-            # 7. 检查致命缺陷 (包含技术面与估值泡沫致命缺陷)
+            # 7. 检查致命缺陷（仅网格体格：振幅与流动性）
             fatal_flaws = []
             if amplitude_eval['score'] == 0:
                 fatal_flaws.append("振幅不足")
             if liquidity_eval['score'] <= 1:
                 fatal_flaws.append("流动性严重不足")
-            if valuation_info and valuation_info.get('is_fatal_flaw'):
-                fatal_flaws.append(valuation_info.get('fatal_flaw_reason', '估值处于历史极端高位'))
             
             has_fatal_flaw = len(fatal_flaws) > 0
             if has_fatal_flaw:
@@ -352,8 +359,6 @@ class SuitabilityAnalyzer:
                 'market_characteristics': market_eval,
                 'liquidity': liquidity_eval
             }
-            if valuation_info:
-                evaluations_dict['valuation'] = valuation_info
             
             return {
                 'total_score': total_score,
@@ -371,8 +376,7 @@ class SuitabilityAnalyzer:
                     'adx_value': adx_value,
                     'avg_amount': avg_amount,
                     'volume_stability': volume_stability
-                },
-                'valuation_summary': valuation_info
+                }
             }
 
             

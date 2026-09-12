@@ -61,6 +61,11 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
     "edaSteps",
     initialValues?.edaSteps || { small: 5, medium: 15, large: 30 },
   );
+  // ATR自适应自定义乘数：默认小网0.6、中网1.2、大网2.5
+  const [atrMultipliers, setAtrMultipliers] = usePersistedState(
+    "atrMultipliers",
+    initialValues?.atrMultipliers || { small: 0.6, medium: 1.2, large: 2.5 },
+  );
   // 自定义基准价格模式：'market' 最新市场价 (默认) | 'custom' 自定义成本价
   const [benchmarkMode, setBenchmarkMode] = useState(
     initialValues?.benchmarkPrice ? "custom" : "market",
@@ -233,6 +238,54 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
     setEdaSteps({ small: 5, medium: 15, large: 30 });
   };
 
+  // 校验 ATR 自定义乘数
+  const getAtrMultiplierError = () => {
+    if (stepMode !== "atr") return null;
+    const s = Number(atrMultipliers?.small);
+    const m = Number(atrMultipliers?.medium);
+    const l = Number(atrMultipliers?.large);
+    if (isNaN(s) || isNaN(m) || isNaN(l)) {
+      return "请输入完整的乘数数值";
+    }
+    if (s < 0.2) return "小网乘数最低为 0.2x";
+    if (s >= m) return `小网乘数 (${s}x) 必须小于中网乘数 (${m}x)`;
+    if (m >= l) return `中网乘数 (${m}x) 必须小于大网乘数 (${l}x)`;
+    if (l > 5.0) return "大网乘数最高为 5.0x";
+    return null;
+  };
+
+  const atrMultiplierError = getAtrMultiplierError();
+
+  // 处理 ATR 乘数步进加减
+  const handleAtrMultiplierChange = (rail, delta) => {
+    setAtrMultipliers((prev) => {
+      const current = { ...(prev || { small: 0.6, medium: 1.2, large: 2.5 }) };
+      const currentVal = Number(current[rail]);
+      const nextVal = Math.round((currentVal + delta) * 10) / 10;
+
+      if (rail === "small") {
+        if (delta > 0 && nextVal >= Number(current.medium)) return prev;
+        if (delta < 0 && nextVal < 0.2) return prev;
+      } else if (rail === "medium") {
+        if (delta > 0 && nextVal >= Number(current.large)) return prev;
+        if (delta < 0 && nextVal <= Number(current.small)) return prev;
+      } else if (rail === "large") {
+        if (delta > 0 && nextVal > 5.0) return prev;
+        if (delta < 0 && nextVal <= Number(current.medium)) return prev;
+      }
+
+      return {
+        ...current,
+        [rail]: nextVal,
+      };
+    });
+  };
+
+  // 一键恢复默认 ATR 乘数
+  const handleResetAtrMultipliers = () => {
+    setAtrMultipliers({ small: 0.6, medium: 1.2, large: 2.5 });
+  };
+
   // 表单验证
   const validateForm = () => {
     const newErrors = {};
@@ -248,6 +301,9 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
 
     if (stepMode === "fixed_eda" && edaStepError) {
       newErrors.edaSteps = edaStepError;
+    }
+    if (stepMode === "atr" && atrMultiplierError) {
+      newErrors.atrMultipliers = atrMultiplierError;
     }
 
     setErrors(newErrors);
@@ -278,6 +334,7 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
         medium: Number(edaSteps.medium) / 100,
         large: Number(edaSteps.large) / 100,
       } : undefined,
+      atrMultipliers: stepMode === "atr" ? atrMultipliers : undefined,
       benchmarkPrice: (benchmarkMode === "custom" && customPrice) ? parseFloat(customPrice) : null,
     };
 
@@ -475,7 +532,9 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
               步长生成模式
             </label>
             <span className="text-xs text-indigo-700 font-medium">
-              {stepMode === "fixed_eda" ? `🏛️ E大原版 ${edaSteps?.small || 5}%/${edaSteps?.medium || 15}%/${edaSteps?.large || 30}%` : "★ 🌊 ATR 动态自适应"}
+              {stepMode === "fixed_eda"
+                ? `🏛️ E大原版 ${edaSteps?.small || 5}%/${edaSteps?.medium || 15}%/${edaSteps?.large || 30}%`
+                : `★ 🌊 ATR ${Number(atrMultipliers?.small ?? 0.6).toFixed(1)}x/${Number(atrMultipliers?.medium ?? 1.2).toFixed(1)}x/${Number(atrMultipliers?.large ?? 2.5).toFixed(1)}x`}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -512,6 +571,181 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
               </div>
             </button>
           </div>
+
+          {/* ATR动态自适应模式下默认常驻展开的三轨乘数微调区 */}
+          {stepMode === "atr" && (
+            <div className="mt-3 p-3 bg-indigo-50/70 border border-indigo-200/90 rounded-xl space-y-2.5">
+              <div className="flex items-center justify-between border-b border-indigo-200/70 pb-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-950">
+                  <Sliders className="w-3.5 h-3.5 text-indigo-700" />
+                  <span>自定义三轨 ATR 波动率乘数</span>
+                  <span className="text-[10px] text-indigo-700/80 font-normal">
+                    (必须满足: 小网 &lt; 中网 &lt; 大网)
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleResetAtrMultipliers}
+                  className="inline-flex items-center gap-1 text-[11px] text-indigo-800 hover:text-indigo-950 font-medium px-2 py-0.5 rounded bg-white border border-indigo-300 hover:bg-indigo-100/60 transition-colors shadow-2xs"
+                  title="恢复官方默认 0.6x / 1.2x / 2.5x"
+                >
+                  <RotateCcw className="w-3 h-3 text-indigo-700" />
+                  <span>恢复默认</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {/* 🟢 小网 */}
+                <div className="bg-white/90 border border-indigo-200/80 rounded-lg p-2 shadow-2xs">
+                  <div className="flex items-center justify-between text-[11px] font-medium text-gray-700 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      小网 (高频做T)
+                    </span>
+                    <span className="text-[10px] text-gray-400">资金20%·5档</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleAtrMultiplierChange("small", -0.1)}
+                      disabled={Number(atrMultipliers?.small) <= 0.2}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="减小 0.1x"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="flex items-center justify-center flex-1">
+                      <span className="font-bold text-sm text-gray-900 font-mono">
+                        {Number(atrMultipliers?.small ?? 0.6).toFixed(1)}
+                      </span>
+                      <span className="text-xs text-indigo-700 font-semibold ml-0.5">x</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAtrMultiplierChange("small", 0.1)}
+                      disabled={Number(atrMultipliers?.small) + 0.1 >= Number(atrMultipliers?.medium)}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="增加 0.1x"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 🔵 中网 */}
+                <div className="bg-white/90 border border-indigo-200/80 rounded-lg p-2 shadow-2xs">
+                  <div className="flex items-center justify-between text-[11px] font-medium text-gray-700 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                      中网 (波段巡航)
+                    </span>
+                    <span className="text-[10px] text-gray-400">资金35%·3档</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleAtrMultiplierChange("medium", -0.1)}
+                      disabled={Number(atrMultipliers?.medium) - 0.1 <= Number(atrMultipliers?.small)}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="减小 0.1x"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="flex items-center justify-center flex-1">
+                      <span className="font-bold text-sm text-gray-900 font-mono">
+                        {Number(atrMultipliers?.medium ?? 1.2).toFixed(1)}
+                      </span>
+                      <span className="text-xs text-indigo-700 font-semibold ml-0.5">x</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAtrMultiplierChange("medium", 0.1)}
+                      disabled={Number(atrMultipliers?.medium) + 0.1 >= Number(atrMultipliers?.large)}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="增加 0.1x"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 🟣 大网 */}
+                <div className="bg-white/90 border border-indigo-200/80 rounded-lg p-2 shadow-2xs">
+                  <div className="flex items-center justify-between text-[11px] font-medium text-gray-700 mb-1.5">
+                    <span className="flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                      大网 (估值防守)
+                    </span>
+                    <span className="text-[10px] text-gray-400">资金45%·2档</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleAtrMultiplierChange("large", -0.1)}
+                      disabled={Number(atrMultipliers?.large) - 0.1 <= Number(atrMultipliers?.medium)}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="减小 0.1x"
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </button>
+                    <div className="flex items-center justify-center flex-1">
+                      <span className="font-bold text-sm text-gray-900 font-mono">
+                        {Number(atrMultipliers?.large ?? 2.5).toFixed(1)}
+                      </span>
+                      <span className="text-xs text-indigo-700 font-semibold ml-0.5">x</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAtrMultiplierChange("large", 0.1)}
+                      disabled={Number(atrMultipliers?.large) >= 5.0}
+                      className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title="增加 0.1x"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* 快捷场景预设按钮 */}
+              <div className="flex items-center justify-between pt-1 border-t border-indigo-100/80 text-[11px]">
+                <span className="text-gray-500">快捷预设:</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setAtrMultipliers({ small: 0.4, medium: 0.8, large: 1.8 })}
+                    className="px-2 py-0.5 rounded bg-white border border-indigo-200 text-indigo-800 hover:bg-indigo-50 transition-colors"
+                    title="高频吃碎步"
+                  >
+                    ⚡ 超高频 (0.4/0.8/1.8)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAtrMultipliers({ small: 0.6, medium: 1.2, large: 2.5 })}
+                    className="px-2 py-0.5 rounded bg-white border border-indigo-200 text-indigo-800 hover:bg-indigo-50 transition-colors font-medium"
+                    title="官方推荐经典乘数"
+                  >
+                    ⚖️ 经典平衡 (0.6/1.2/2.5)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAtrMultipliers({ small: 0.8, medium: 1.5, large: 3.2 })}
+                    className="px-2 py-0.5 rounded bg-white border border-indigo-200 text-indigo-800 hover:bg-indigo-50 transition-colors"
+                    title="宽网避震荡"
+                  >
+                    🛡️ 宽网防守 (0.8/1.5/3.2)
+                  </button>
+                </div>
+              </div>
+
+              {atrMultiplierError && (
+                <div className="flex items-center gap-1 text-[11px] text-rose-600 bg-rose-50 border border-rose-200 rounded px-2 py-1">
+                  <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                  <span>{atrMultiplierError}</span>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* E大原版模式下展开的步长微调区 */}
           {stepMode === "fixed_eda" && (

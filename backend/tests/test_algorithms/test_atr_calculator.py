@@ -7,7 +7,12 @@ import pytest
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from algorithms.atr.calculator import ATRCalculator, calculate_volatility, calculate_adx
+from algorithms.atr.calculator import (
+    ATRCalculator,
+    build_directional_movement,
+    calculate_adx,
+    calculate_volatility,
+)
 
 
 class TestATRCalculator:
@@ -246,3 +251,95 @@ class TestADXFunction:
         
         assert isinstance(adx_short, float)
         assert isinstance(adx_long, float)
+
+    def test_adx_matches_independent_wilder_rma(self):
+        """固定序列上与独立 Wilder 递推一致"""
+        df = TestATRCalculator()._create_sample_data(40)
+        expected = _reference_wilder_adx(df, period=14)
+        actual = calculate_adx(df)
+
+        assert actual is not None
+        assert abs(actual - expected) < 1e-6
+
+    def test_down_bar_records_only_minus_dm(self):
+        """下跌日只记负向方向运动"""
+        high = pd.Series([10.0, 9.5])
+        low = pd.Series([8.0, 7.0])
+        plus_dm, minus_dm = build_directional_movement(high, low)
+
+        assert plus_dm[1] == 0.0
+        assert minus_dm[1] == 1.0
+
+    def test_equal_moves_record_zero_dm(self):
+        """两侧运动相等时方向运动均为零"""
+        high = pd.Series([10.0, 11.0])
+        low = pd.Series([8.0, 7.0])
+        plus_dm, minus_dm = build_directional_movement(high, low)
+
+        assert plus_dm[1] == 0.0
+        assert minus_dm[1] == 0.0
+
+    def test_flat_series_dx_zero_does_not_drop_adx(self):
+        """方向指数之和为零时 DX 为 0，ADX 仍可计算"""
+        df = pd.DataFrame({
+            'high': [10.0] * 40,
+            'low': [10.0] * 40,
+            'close': [10.0] * 40,
+        })
+
+        assert calculate_adx(df) == 0.0
+
+    def test_short_history_returns_none(self):
+        """少于 28 根时返回空，不返回 0.0"""
+        df = TestATRCalculator()._create_sample_data(27)
+
+        assert calculate_adx(df) is None
+
+
+def _reference_wilder_adx(df: pd.DataFrame, period: int = 14) -> float:
+    """与生产实现分离的 Wilder ADX 参考递推。"""
+    high = df['high'].to_numpy(dtype=float)
+    low = df['low'].to_numpy(dtype=float)
+    close = df['close'].to_numpy(dtype=float)
+    size = len(df)
+    up_move = np.full(size, np.nan)
+    down_move = np.full(size, np.nan)
+    true_range = np.full(size, np.nan)
+    up_move[1:] = high[1:] - high[:-1]
+    down_move[1:] = low[:-1] - low[1:]
+    previous_close = np.full(size, np.nan)
+    previous_close[1:] = close[:-1]
+    true_range[1:] = np.maximum(
+        high[1:] - low[1:],
+        np.maximum(np.abs(high[1:] - previous_close[1:]), np.abs(low[1:] - previous_close[1:])),
+    )
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+    plus_dm[0] = np.nan
+    minus_dm[0] = np.nan
+
+    def rma(values):
+        smoothed = np.full(size, np.nan)
+        seed_at = next(
+            index for index in range(period - 1, size)
+            if np.all(np.isfinite(values[index - period + 1:index + 1]))
+        )
+        smoothed[seed_at] = float(np.mean(values[seed_at - period + 1:seed_at + 1]))
+        for index in range(seed_at + 1, size):
+            smoothed[index] = (smoothed[index - 1] * (period - 1) + values[index]) / period
+        return smoothed
+
+    smooth_plus = rma(plus_dm)
+    smooth_minus = rma(minus_dm)
+    smooth_tr = rma(true_range)
+    plus_di = np.divide(100.0 * smooth_plus, smooth_tr, out=np.zeros(size), where=smooth_tr > 0)
+    minus_di = np.divide(100.0 * smooth_minus, smooth_tr, out=np.zeros(size), where=smooth_tr > 0)
+    plus_di[:period] = np.nan
+    minus_di[:period] = np.nan
+    di_sum = plus_di + minus_di
+    dx = np.full(size, np.nan)
+    valid = np.isfinite(di_sum)
+    dx[valid & (di_sum <= 0)] = 0.0
+    dx[valid & (di_sum > 0)] = 100.0 * np.abs(plus_di[valid & (di_sum > 0)] - minus_di[valid & (di_sum > 0)]) / di_sum[valid & (di_sum > 0)]
+    adx = rma(dx)
+    return float(adx[-1])

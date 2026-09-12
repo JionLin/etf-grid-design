@@ -41,6 +41,7 @@ export const DEFAULT_PARAMS = {
   scaling: "0.0", // 逐格加码比例：0.0 ~ 0.20
   reinvest: "pool_shares", // 做T收益留存模式：'pool_shares' | 'cash'
   edaSteps: "5,15,30", // E大原版自定义各轨步长比例：默认 5,15,30
+  atrMultipliers: "0.6,1.2,2.5", // ATR自适应自定义各轨乘数：默认 0.6,1.2,2.5
 };
 
 /**
@@ -89,6 +90,18 @@ export const encodeAnalysisParams = (params) => {
     if (s !== undefined && m !== undefined && l !== undefined) {
       if (!(Number(s) === 5 && Number(m) === 15 && Number(l) === 30)) {
         searchParams.set("eda_steps", `${s},${m},${l}`);
+      }
+    }
+  }
+
+  // ATR模式自定义各轨乘数 (仅当为 atr 且非默认 0.6,1.2,2.5 时记录)
+  if (params.stepMode !== "fixed_eda" && params.atrMultipliers) {
+    const s = params.atrMultipliers.small;
+    const m = params.atrMultipliers.medium;
+    const l = params.atrMultipliers.large;
+    if (s !== undefined && m !== undefined && l !== undefined) {
+      if (!(Number(s) === 0.6 && Number(m) === 1.2 && Number(l) === 2.5)) {
+        searchParams.set("atr_mults", `${s},${m},${l}`);
       }
     }
   }
@@ -171,6 +184,18 @@ export const decodeAnalysisParams = (searchParams) => {
       const [s, m, l] = parts;
       if (s >= 1 && s < m && m < l && l <= 50) {
         params.edaSteps = { small: s, medium: m, large: l };
+      }
+    }
+  }
+
+  // 解析 ATR模式自定义各轨乘数
+  const atrMultsRaw = searchParams.get("atr_mults") || searchParams.get("atrMultipliers");
+  if (atrMultsRaw) {
+    const parts = atrMultsRaw.split(",").map((p) => parseFloat(p.trim()));
+    if (parts.length === 3 && parts.every((n) => !isNaN(n))) {
+      const [s, m, l] = parts;
+      if (s >= 0.1 && s < m && m < l && l <= 10.0) {
+        params.atrMultipliers = { small: s, medium: m, large: l };
       }
     }
   }
@@ -286,6 +311,24 @@ export const validateAndCompleteParams = (params) => {
     } else {
       result.params.edaSteps = { small: 5, medium: 15, large: 30 };
     }
+  }
+
+  // 验证并补全 ATR 模式乘数
+  if (params.atrMultipliers) {
+    const s = parseFloat(params.atrMultipliers.small);
+    const m = parseFloat(params.atrMultipliers.medium);
+    const l = parseFloat(params.atrMultipliers.large);
+    if (!isNaN(s) && !isNaN(m) && !isNaN(l) && s >= 0.1 && s < m && m < l && l <= 10.0) {
+      result.params.atrMultipliers = {
+        small: Math.round(s * 100) / 100,
+        medium: Math.round(m * 100) / 100,
+        large: Math.round(l * 100) / 100,
+      };
+    } else {
+      result.params.atrMultipliers = { small: 0.6, medium: 1.2, large: 2.5 };
+    }
+  } else {
+    result.params.atrMultipliers = { small: 0.6, medium: 1.2, large: 2.5 };
   }
 
   // 验证并补全历史分析周期

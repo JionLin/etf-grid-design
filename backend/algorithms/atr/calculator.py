@@ -5,7 +5,7 @@ ATR计算器 - 纯算法实现
 
 import pandas as pd
 import numpy as np
-from typing import Tuple
+from typing import Optional, Tuple
 import logging
 
 logger = logging.getLogger(__name__)
@@ -161,59 +161,135 @@ def calculate_volatility(df: pd.DataFrame) -> float:
         logger.error(f"波动率计算失败: {str(e)}")
         return 0.0
 
-def calculate_adx(df: pd.DataFrame, period: int = 14) -> float:
+def build_directional_movement(high: pd.Series, low: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
     """
-    计算ADX指数（平均动向指数）
-    用于判断趋势强度
-    
+    构造互斥的正向/负向方向运动。
+
+    负向运动取前一日最低价减当日最低价。首根没有前值，记为缺失，避免把 0 送进平滑种子。
+
     Args:
-        df: 包含OHLC数据的DataFrame
-        period: 计算周期
-        
+        high: 最高价序列
+        low: 最低价序列
+
     Returns:
-        ADX值
+        正向方向运动与负向方向运动
+    """
+    high_values = high.to_numpy(dtype=float)
+    low_values = low.to_numpy(dtype=float)
+    up_move = np.full(len(high_values), np.nan)
+    down_move = np.full(len(low_values), np.nan)
+    if len(high_values) > 1:
+        up_move[1:] = high_values[1:] - high_values[:-1]
+        down_move[1:] = low_values[:-1] - low_values[1:]
+
+    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0).astype(float)
+    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0).astype(float)
+    plus_dm[0] = np.nan
+    minus_dm[0] = np.nan
+    return plus_dm, minus_dm
+
+
+def _true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> np.ndarray:
+    """计算真实波幅。首根因缺少前收记为缺失。"""
+    high_values = high.to_numpy(dtype=float)
+    low_values = low.to_numpy(dtype=float)
+    close_values = close.to_numpy(dtype=float)
+    previous_close = np.full(len(close_values), np.nan)
+    if len(close_values) > 1:
+        previous_close[1:] = close_values[:-1]
+
+    high_low = high_values - low_values
+    high_close = np.abs(high_values - previous_close)
+    low_close = np.abs(low_values - previous_close)
+    true_range = np.maximum(high_low, np.maximum(high_close, low_close))
+    true_range[0] = np.nan
+    return true_range
+
+
+def _wilder_rma(values: np.ndarray, period: int) -> np.ndarray:
+    """
+    SMA 种子的 Wilder RMA。
+
+    种子取首个完整窗口的算术平均，之后递推 S_t = (S_{t-1} * (period - 1) + X_t) / period。
+    不用 ewm(adjust=False)，以免种子落在第一根而不是前 period 根的平均。
+    """
+    smoothed = np.full(len(values), np.nan)
+    if period < 1 or len(values) < period:
+        return smoothed
+
+    seed_index = None
+    for index in range(period - 1, len(values)):
+        window = values[index - period + 1:index + 1]
+        if np.all(np.isfinite(window)):
+            seed_index = index
+            break
+    if seed_index is None:
+        return smoothed
+
+    smoothed[seed_index] = float(np.mean(values[seed_index - period + 1:seed_index + 1]))
+    for index in range(seed_index + 1, len(values)):
+        current = values[index]
+        previous = smoothed[index - 1]
+        if not np.isfinite(current) or not np.isfinite(previous):
+            break
+        smoothed[index] = (previous * (period - 1) + current) / period
+    return smoothed
+
+
+def _directional_index(smooth_dm: np.ndarray, smooth_tr: np.ndarray) -> np.ndarray:
+    """平滑方向运动与平滑真实波幅的比值。波幅为 0 时记 0，预热段保持缺失。"""
+    directional_index = np.full(len(smooth_tr), np.nan)
+    valid = np.isfinite(smooth_dm) & np.isfinite(smooth_tr)
+    positive_range = valid & (smooth_tr > 0)
+    zero_range = valid & (smooth_tr <= 0)
+    directional_index[positive_range] = 100.0 * smooth_dm[positive_range] / smooth_tr[positive_range]
+    directional_index[zero_range] = 0.0
+    return directional_index
+
+
+def _dx_from_di(plus_di: np.ndarray, minus_di: np.ndarray) -> np.ndarray:
+    """DX。方向指数之和为 0 时记 0，避免除零把后续 ADX 变成缺失。"""
+    dx = np.full(len(plus_di), np.nan)
+    di_sum = plus_di + minus_di
+    valid = np.isfinite(plus_di) & np.isfinite(minus_di) & np.isfinite(di_sum)
+    has_direction = valid & (di_sum > 0)
+    no_direction = valid & (di_sum <= 0)
+    dx[has_direction] = 100.0 * np.abs(plus_di[has_direction] - minus_di[has_direction]) / di_sum[has_direction]
+    dx[no_direction] = 0.0
+    return dx
+
+
+def calculate_adx(df: pd.DataFrame, period: int = 14) -> Optional[float]:
+    """
+    计算 Welles Wilder ADX。
+
+    方向运动、真实波幅与 DX 都用周期 period 的 SMA 种子 RMA。
+    样本短于 2 * period，或最后一个平滑值为缺失时返回空，不把算不出的指标记成 0。
+
+    Args:
+        df: 包含 high、low、close 的 DataFrame
+        period: 平滑周期，默认 14
+
+    Returns:
+        最后一个有效 ADX；不可用时返回 None
     """
     try:
-        # 计算方向性移动
-        df['high_diff'] = df['high'].diff()
-        df['low_diff'] = df['low'].diff()
-        
-        # 计算+DM和-DM
-        df['plus_dm'] = np.where(
-            (df['high_diff'] > df['low_diff']) & (df['high_diff'] > 0),
-            df['high_diff'], 0
-        )
-        df['minus_dm'] = np.where(
-            (df['low_diff'] > df['high_diff']) & (df['low_diff'] > 0),
-            df['low_diff'], 0
-        )
-        
-        # 计算真实波幅
-        df['tr'] = np.maximum(
-            df['high'] - df['low'],
-            np.maximum(
-                abs(df['high'] - df['close'].shift(1)),
-                abs(df['low'] - df['close'].shift(1))
-            )
-        )
-        
-        # 计算平滑的DM和TR
-        df['plus_dm_smooth'] = df['plus_dm'].rolling(period).mean()
-        df['minus_dm_smooth'] = df['minus_dm'].rolling(period).mean()
-        df['tr_smooth'] = df['tr'].rolling(period).mean()
-        
-        # 计算+DI和-DI
-        df['plus_di'] = 100 * df['plus_dm_smooth'] / df['tr_smooth']
-        df['minus_di'] = 100 * df['minus_dm_smooth'] / df['tr_smooth']
-        
-        # 计算DX
-        df['dx'] = 100 * abs(df['plus_di'] - df['minus_di']) / (df['plus_di'] + df['minus_di'])
-        
-        # 计算ADX
-        adx = df['dx'].rolling(period).mean().iloc[-1]
-        
-        return float(adx) if not np.isnan(adx) else 0.0
-        
+        if df is None or period < 1 or len(df) < period * 2:
+            return None
+        required_columns = ('high', 'low', 'close')
+        if any(column not in df.columns for column in required_columns):
+            logger.error("ADX计算失败: 缺少 high/low/close")
+            return None
+
+        plus_dm, minus_dm = build_directional_movement(df['high'], df['low'])
+        smooth_tr = _wilder_rma(_true_range(df['high'], df['low'], df['close']), period)
+        plus_di = _directional_index(_wilder_rma(plus_dm, period), smooth_tr)
+        minus_di = _directional_index(_wilder_rma(minus_dm, period), smooth_tr)
+        adx_series = _wilder_rma(_dx_from_di(plus_di, minus_di), period)
+        last_adx = adx_series[-1]
+        if not np.isfinite(last_adx):
+            return None
+        return float(last_adx)
     except Exception as e:
         logger.error(f"ADX计算失败: {str(e)}")
-        return 0.0
+        return None

@@ -1,7 +1,6 @@
-import React, { useRef, useState } from "react";
+import React, { useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import HeroSection from "./components/HeroSection";
-import ETFSelectionRadarCard from "./components/ETFSelectionRadarCard";
 import ParameterForm from "@features/analysis/components/ParameterForm";
 import AnalysisHistory from "@features/history/components/AnalysisHistory";
 import { generateAnalysisURL } from "@shared/utils/url";
@@ -12,7 +11,6 @@ import { generateAnalysisURL } from "@shared/utils/url";
  */
 export default function HomePage() {
   const parameterFormRef = useRef(null);
-  const [formInitialValues, setFormInitialValues] = useState(null);
 
   // 处理分析请求 - 跳转到分析页面
   const handleAnalysis = async (parameters) => {
@@ -22,23 +20,6 @@ export default function HomePage() {
 
   // 滚动到策略参数设置
   const scrollToParameterForm = () => {
-    if (parameterFormRef.current) {
-      parameterFormRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }
-  };
-
-  // 从选品雷达点击一键布网联动
-  const handleSelectFromRadar = (item) => {
-    const scaling = item.safe_score >= 85 ? 0.10 : 0.05;
-    setFormInitialValues({
-      etfCode: item.etf_code,
-      scalingRatio: scaling,
-      riskPreference: item.safe_score >= 85 ? "激进" : "均衡",
-    });
-
     if (parameterFormRef.current) {
       parameterFormRef.current.scrollIntoView({
         behavior: "smooth",
@@ -60,14 +41,8 @@ export default function HomePage() {
       <div className="space-y-8">
         <HeroSection onStartAnalysis={scrollToParameterForm} />
 
-        {/* 今日网格选品雷达看板 */}
-        <ETFSelectionRadarCard onSelectETF={handleSelectFromRadar} />
-
         <div ref={parameterFormRef}>
-          <ParameterForm
-            onAnalysis={handleAnalysis}
-            initialValues={formInitialValues}
-          />
+          <ParameterForm onAnalysis={handleAnalysis} />
         </div>
 
         <AnalysisHistory />

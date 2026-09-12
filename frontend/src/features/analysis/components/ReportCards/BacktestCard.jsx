@@ -31,6 +31,7 @@ const BacktestCard = ({
   stepMode = "atr",
   edaStepRatios = null,
   edaSteps = null,
+  atrMultipliers = null,
 }) => {
   const safeTotalCapital = Number(totalCapital || 30000);
   const [backtestDays, setBacktestDays] = useState(initialDays);
@@ -63,6 +64,7 @@ const BacktestCard = ({
         stepMode,
         edaStepRatios,
         edaSteps,
+        atrMultipliers,
         customBasePrice: activeCustomPrice,
       });
       if (res?.success && res.data) {
@@ -81,7 +83,7 @@ const BacktestCard = ({
     if (etfCode) {
       fetchBacktest(backtestDays);
     }
-  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps, anchorMode]);
+  }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps, atrMultipliers, anchorMode]);
 
   const summary = backtestData?.summary;
   const profitPool = backtestData?.profit_pool || summary?.profit_pool;
@@ -251,7 +253,7 @@ const BacktestCard = ({
                 </span>
               ) : (
                 <span className="text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-mono">
-                  🌊 ATR 自适应步长
+                  🌊 ATR 自适应步长 ({atrMultipliers ? `${atrMultipliers.small}x/${atrMultipliers.medium}x/${atrMultipliers.large}x` : "0.6x/1.2x/2.5x"})
                 </span>
               )}
             </div>

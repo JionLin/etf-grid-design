@@ -281,7 +281,7 @@ const AnalysisPage = () => {
                       </span>
                     ) : (
                       <span className="text-indigo-700 font-semibold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200 font-mono text-xs">
-                        ★ 🌊 ATR自适应
+                        ★ 🌊 ATR自适应({currentParams?.atrMultipliers?.small || 0.6}x/{currentParams?.atrMultipliers?.medium || 1.2}x/{currentParams?.atrMultipliers?.large || 2.5}x)
                       </span>
                     )}
                   </span>

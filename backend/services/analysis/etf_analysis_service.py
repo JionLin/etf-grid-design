@@ -17,8 +17,6 @@ from algorithms.grid.optimizer import GridOptimizer
 from .suitability_analyzer import SuitabilityAnalyzer
 from .grid_calculator import CompositeGridCalculator
 from .backtest_engine import GridBacktestEngine
-from .valuation_engine import ValuationEngine
-from repositories.valuation_repository import ValuationRepository
 from config.constants import ETFConstants
 
 
@@ -53,8 +51,6 @@ class ETFAnalysisService:
         self.suitability_analyzer = suitability_analyzer or SuitabilityAnalyzer()
         self.composite_grid_calculator = CompositeGridCalculator()
         self.backtest_engine = GridBacktestEngine()
-        self.valuation_engine = ValuationEngine(getattr(self.akshare_client, 'cache', None))
-        self.valuation_repo = ValuationRepository()
         
         # 热门ETF列表 (涵盖宽基指数、稳定行业与景气行业核心标的)
         self.popular_etfs = [
@@ -91,15 +87,6 @@ class ETFAnalysisService:
         """获取热门ETF列表"""
         return self.popular_etfs
 
-    def get_radar_rankings(self, category: str = "all", limit: int = 20) -> List[Dict]:
-        """获取选品雷达推荐榜单（从 SQLite 存储库查询）"""
-        return self.valuation_repo.query_radar_rankings(category=category, limit=limit)
-
-    def get_etf_valuation(self, etf_code: str) -> Dict:
-        """获取指定ETF的估值温度计数据"""
-        return self.valuation_engine.evaluate_valuation(etf_code)
-
-    
     def get_etf_basic_info(self, etf_code: str) -> Dict:
         """
         获取ETF基础信息
@@ -194,7 +181,8 @@ class ETFAnalysisService:
                            scaling_ratio: float = 0.0,
                            step_mode: str = 'atr',
                            benchmark_price: Optional[float] = None,
-                           eda_step_ratios: Optional[Dict[str, float]] = None) -> Dict:
+                           eda_step_ratios: Optional[Dict[str, float]] = None,
+                           atr_multipliers: Optional[Dict[str, float]] = None) -> Dict:
         """
         完整的ETF网格交易策略分析
         
@@ -224,11 +212,8 @@ class ETFAnalysisService:
             if not latest_price_info:
                 raise ValueError(f"未获取到ETF最新价格: {etf_code}")
             
-            # 4. 获取估值分析
-            valuation_info = self.valuation_engine.evaluate_valuation(etf_code)
-
-            # 5. 执行适宜度评估 (传入估值信息)
-            suitability_result = self.suitability_analyzer.comprehensive_evaluation(df, etf_info, valuation_info=valuation_info)
+            # 4. 执行适宜度评估（只看网格体格，不引入估值）
+            suitability_result = self.suitability_analyzer.comprehensive_evaluation(df, etf_info)
             
             # 6. 计算网格策略参数（使用算法模块）
             atr_analysis = suitability_result['atr_analysis']
@@ -246,6 +231,7 @@ class ETFAnalysisService:
                 step_mode=step_mode,
                 benchmark_price=benchmark_price,
                 eda_step_ratios=eda_step_ratios,
+                atr_multipliers=atr_multipliers,
             )
             
             # 5. 生成策略分析依据
@@ -263,7 +249,6 @@ class ETFAnalysisService:
                 'etf_info': etf_info,
                 'data_quality': suitability_result['data_quality'],
                 'suitability_evaluation': suitability_result,
-                'valuation': valuation_info,
                 'grid_strategy': grid_params,
                 'strategy_rationale': strategy_rationale,
                 'adjustment_suggestions': adjustment_suggestions,
@@ -287,6 +272,8 @@ class ETFAnalysisService:
                     'stepMode': step_mode,
                     'eda_step_ratios': eda_step_ratios,
                     'edaStepRatios': eda_step_ratios,
+                    'atr_multipliers': atr_multipliers,
+                    'atrMultipliers': atr_multipliers,
                     'benchmark_price': benchmark_price,
                     'benchmarkPrice': benchmark_price,
                 }
@@ -392,9 +379,11 @@ class ETFAnalysisService:
                 'profit_enhancement': []
             }
             
-            # 市场环境变化应对
-            adx_value = suitability_result['market_indicators']['adx_value']
-            if adx_value > 25:
+            # 市场环境变化应对。ADX 为空时跳过，避免把缺失值当成震荡市去加密网格。
+            adx_value = suitability_result['market_indicators'].get('adx_value')
+            if adx_value is None:
+                logger.debug("ADX不可用，跳过趋势建议")
+            elif adx_value > 25:
                 suggestions['market_environment_changes'].append(
                     "当前处于强趋势环境，建议增加底仓比例，减少网格交易频率"
                 )
@@ -447,7 +436,8 @@ class ETFAnalysisService:
                                  scaling_ratio: float = 0.0,
                                  step_mode: str = 'atr',
                                  benchmark_price: Optional[float] = None,
-                                 eda_step_ratios: Optional[Dict[str, float]] = None) -> Dict:
+                                 eda_step_ratios: Optional[Dict[str, float]] = None,
+                                 atr_multipliers: Optional[Dict[str, float]] = None) -> Dict:
         """
         计算网格策略参数（使用算法模块）
         
@@ -473,7 +463,7 @@ class ETFAnalysisService:
             # 1. 先行计算大中小三层复合网格阶梯 (以 anchor_price 为中心铺设，尊重 step_mode 与自定义比例)
             composite_steps = self.grid_optimizer.calculate_composite_steps(
                 anchor_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
-                eda_step_ratios=eda_step_ratios
+                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, anchor_price, composite_steps, base_position_ratio=0.5,
@@ -616,6 +606,7 @@ class ETFAnalysisService:
         step_mode: str = 'atr',
         eda_step_ratios: Optional[Dict[str, float]] = None,
         custom_base_price: Optional[float] = None,
+        atr_multipliers: Optional[Dict[str, float]] = None,
     ) -> Dict[str, Any]:
         """
         运行策略历史回测
@@ -672,7 +663,7 @@ class ETFAnalysisService:
             # 以当年真实基准价格 backtest_base_price 展开回测网格阶梯
             composite_steps = self.grid_optimizer.calculate_composite_steps(
                 backtest_base_price, atr_ratio, adjustment_coefficient, step_mode=step_mode,
-                eda_step_ratios=eda_step_ratios
+                eda_step_ratios=eda_step_ratios, atr_multipliers=atr_multipliers
             )
             composite_grid = self.composite_grid_calculator.calculate_composite_grid(
                 total_capital, backtest_base_price, composite_steps, base_position_ratio=0.5,

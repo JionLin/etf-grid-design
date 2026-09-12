@@ -127,10 +127,39 @@ def analyze_etf_strategy():
                         'medium': round(m, 4),
                         'large': round(l, 4),
                     }
+
+        # 获取 ATR 模式下自定义各轨乘数 (可选参数)
+        atr_multipliers = None
+        raw_atr_m = data.get('atrMultipliers', data.get('atr_multipliers'))
+        if raw_atr_m and step_mode == 'atr':
+            mults = {}
+            if isinstance(raw_atr_m, str):
+                parts = [p.strip() for p in raw_atr_m.split(',') if p.strip()]
+                if len(parts) == 3:
+                    try:
+                        vals = [float(p) for p in parts]
+                        mults = {'small': vals[0], 'medium': vals[1], 'large': vals[2]}
+                    except (ValueError, TypeError):
+                        pass
+            elif isinstance(raw_atr_m, dict):
+                for rail in ['small', 'medium', 'large']:
+                    if rail in raw_atr_m and raw_atr_m[rail] is not None:
+                        try:
+                            mults[rail] = float(raw_atr_m[rail])
+                        except (ValueError, TypeError):
+                            pass
+            if len(mults) == 3:
+                s, m, l = mults['small'], mults['medium'], mults['large']
+                if 0.1 <= s < m < l <= 10.0:
+                    atr_multipliers = {
+                        'small': round(s, 2),
+                        'medium': round(m, 2),
+                        'large': round(l, 2),
+                    }
         
         from flask import current_app
         current_app.logger.info(f"开始分析ETF策略: {etf_code}, 资金{total_capital}, "
-                   f"{grid_type}网格, {risk_preference}, 加码{scaling_ratio}, 步长模式{step_mode}, 基准价{benchmark_price}, 自定义步长{eda_step_ratios}, 周期{analysis_days}天")
+                   f"{grid_type}网格, {risk_preference}, 加码{scaling_ratio}, 步长模式{step_mode}, 基准价{benchmark_price}, 自定义步长{eda_step_ratios}, 自定义乘数{atr_multipliers}, 周期{analysis_days}天")
         
         # 执行分析
         analysis_result = etf_service.analyze_etf_strategy(
@@ -144,6 +173,7 @@ def analyze_etf_strategy():
             step_mode=step_mode,
             benchmark_price=benchmark_price,
             eda_step_ratios=eda_step_ratios,
+            atr_multipliers=atr_multipliers,
         )
         
         current_app.logger.info(f"ETF策略分析完成: {etf_code}, "
@@ -222,6 +252,35 @@ def run_backtest():
                         'large': round(l, 4),
                     }
 
+        # 获取 ATR 模式下自定义各轨乘数 (可选参数)
+        atr_multipliers = None
+        raw_atr_m = data.get('atrMultipliers', data.get('atr_multipliers'))
+        if raw_atr_m and step_mode == 'atr':
+            mults = {}
+            if isinstance(raw_atr_m, str):
+                parts = [p.strip() for p in raw_atr_m.split(',') if p.strip()]
+                if len(parts) == 3:
+                    try:
+                        vals = [float(p) for p in parts]
+                        mults = {'small': vals[0], 'medium': vals[1], 'large': vals[2]}
+                    except (ValueError, TypeError):
+                        pass
+            elif isinstance(raw_atr_m, dict):
+                for rail in ['small', 'medium', 'large']:
+                    if rail in raw_atr_m and raw_atr_m[rail] is not None:
+                        try:
+                            mults[rail] = float(raw_atr_m[rail])
+                        except (ValueError, TypeError):
+                            pass
+            if len(mults) == 3:
+                s, m, l = mults['small'], mults['medium'], mults['large']
+                if 0.1 <= s < m < l <= 10.0:
+                    atr_multipliers = {
+                        'small': round(s, 2),
+                        'medium': round(m, 2),
+                        'large': round(l, 2),
+                    }
+
         # 接收可选的自定义回测基准锚点价格
         custom_base_price = data.get('customBasePrice', data.get('custom_base_price'))
         if custom_base_price is not None:
@@ -242,6 +301,7 @@ def run_backtest():
             step_mode=step_mode,
             eda_step_ratios=eda_step_ratios,
             custom_base_price=custom_base_price,
+            atr_multipliers=atr_multipliers,
         )
 
         # 自动归档至本地 SQLite 回测档案库

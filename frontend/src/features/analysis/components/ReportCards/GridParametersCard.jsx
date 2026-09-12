@@ -468,7 +468,13 @@ const GridParametersCard = ({
                       </span>
                     ) : (
                       <span className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-mono">
-                        🌊 ATR 动态自适应
+                        🌊 ATR 动态自适应 {
+                          gridStrategy?.composite_grid?.rails?.small?.multiplier
+                            ? `(${gridStrategy.composite_grid.rails.small.multiplier}x/${gridStrategy.composite_grid.rails.medium.multiplier}x/${gridStrategy.composite_grid.rails.large.multiplier}x)`
+                            : inputParameters?.atrMultipliers
+                            ? `(${inputParameters.atrMultipliers.small}x/${inputParameters.atrMultipliers.medium}x/${inputParameters.atrMultipliers.large}x)`
+                            : "(0.6x/1.2x/2.5x)"
+                        }
                       </span>
                     )}
                   </div>
