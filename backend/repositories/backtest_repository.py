@@ -73,9 +73,53 @@ class BacktestRepository:
                 conn.close()
             # 自动自愈修复历史数据
             self.migrate_fix_zero_metrics()
+            self.migrate_fix_timezone_offset()
         except Exception as e:
             logger.error(f"初始化回测数据库失败: {str(e)}")
             raise
+
+    def migrate_fix_timezone_offset(self):
+        """扫描并自愈历史记录中因 SQLite 默认 UTC 导致比本地时间落后 8 小时的记录"""
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, run_id, created_at FROM backtest_runs
+            """)
+            rows = cursor.fetchall()
+            updates = []
+            for row in rows:
+                rec_id = row["id"]
+                run_id = row["run_id"] or ""
+                c_at = row["created_at"] or ""
+                # run_id 格式如 run_20260912_214434_xxxx
+                parts = run_id.split("_")
+                if len(parts) >= 3 and len(parts[1]) == 8 and len(parts[2]) == 6:
+                    run_date = f"{parts[1][:4]}-{parts[1][4:6]}-{parts[1][6:]}"
+                    run_time = f"{parts[2][:2]}:{parts[2][2:4]}:{parts[2][4:]}"
+                    run_full = f"{run_date} {run_time}"
+                    try:
+                        dt_run = datetime.strptime(run_full, "%Y-%m-%d %H:%M:%S")
+                        dt_c = datetime.strptime(c_at[:19], "%Y-%m-%d %H:%M:%S")
+                        diff_hours = round((dt_run - dt_c).total_seconds() / 3600.0)
+                        if 7 <= diff_hours <= 9:
+                            fixed_c_at = dt_run.strftime("%Y-%m-%d %H:%M:%S")
+                            updates.append((fixed_c_at, rec_id))
+                    except Exception:
+                        continue
+
+            if updates:
+                cursor.executemany("""
+                    UPDATE backtest_runs 
+                    SET created_at = ? 
+                    WHERE id = ?
+                """, updates)
+                conn.commit()
+                logger.info(f"成功自愈回测历史档案时区: 共修复 {len(updates)} 条记录")
+        except Exception as e:
+            logger.warning(f"自愈回测历史档案时区失败: {e}")
+        finally:
+            conn.close()
 
     def migrate_fix_zero_metrics(self):
         """扫描并自愈已有历史快照中因字段错位导致 total_profit 或 annual_return 为 0 的记录"""
@@ -187,6 +231,7 @@ class BacktestRepository:
         trades_json = json.dumps(trades_all, ensure_ascii=False)
         params_json = json.dumps(params or {}, ensure_ascii=False)
 
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
@@ -196,14 +241,14 @@ class BacktestRepository:
                     total_capital, step_mode, reinvest_mode,
                     annual_return, max_drawdown, total_profit, total_trades, free_shares,
                     is_partial_history, partial_reason,
-                    params_json, summary_json, equity_curve_json, trades_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    params_json, summary_json, equity_curve_json, trades_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 run_id, etf_code, etf_name, backtest_days, actual_days,
                 total_capital, step_mode, reinvest_mode,
                 annual_return, max_drawdown, total_profit, total_trades, free_shares,
                 is_partial, partial_reason,
-                params_json, summary_json, equity_curve_json, trades_json
+                params_json, summary_json, equity_curve_json, trades_json, created_at
             ))
             conn.commit()
         finally:
@@ -254,7 +299,7 @@ class BacktestRepository:
                 where_clause = " WHERE " + " AND ".join(conditions)
                 query += where_clause
                 count_query += where_clause
-            query += ") WHERE rn = 1 ORDER BY id DESC LIMIT ? OFFSET ?"
+            query += ") WHERE rn = 1 ORDER BY backtest_days DESC, id DESC LIMIT ? OFFSET ?"
             count_query += ") WHERE rn = 1"
         else:
             query = """
@@ -270,7 +315,7 @@ class BacktestRepository:
                 where_clause = " WHERE " + " AND ".join(conditions)
                 query += where_clause
                 count_query += where_clause
-            query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+            query += " ORDER BY backtest_days DESC, id DESC LIMIT ? OFFSET ?"
 
         fetch_params = params + [max(1, min(200, limit)), max(0, offset)]
 

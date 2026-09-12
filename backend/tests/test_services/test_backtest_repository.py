@@ -138,6 +138,78 @@ class TestBacktestRepository(unittest.TestCase):
         self.assertAlmostEqual(rec['annual_return'], 25.07, places=1)
         self.assertEqual(rec['total_trades'], 50)
 
+    def test_list_runs_sorted_by_longest_period_desc(self):
+        """测试档案库列表严格按照回测周期最长(backtest_days DESC)倒序排列"""
+        dummy_result = {
+            'summary': {'annualized_return': 10.0, 'total_profit': 1000.0},
+            'profit_pool': {'free_shares': 0},
+            'equity_curve': [],
+            'total_trades_all': []
+        }
+        # 故意打乱顺序插入：90天、1825天(5年)、365天(1年)、1095天(3年)
+        self.repo.save_run('515220', '煤炭ETF', 90, 50000.0, 'atr', 'cash', dummy_result)
+        self.repo.save_run('515220', '煤炭ETF', 1825, 50000.0, 'atr', 'cash', dummy_result)
+        self.repo.save_run('515220', '煤炭ETF', 365, 50000.0, 'atr', 'cash', dummy_result)
+        self.repo.save_run('515220', '煤炭ETF', 1095, 50000.0, 'atr', 'cash', dummy_result)
+
+        # 1. 验证 latest_only=True 时的倒序规则
+        runs_latest = self.repo.list_runs(etf_code='515220', latest_only=True)['records']
+        days_seq = [r['backtest_days'] for r in runs_latest]
+        self.assertEqual(days_seq, [1825, 1095, 365, 90])
+
+        # 2. 验证 latest_only=False 时的倒序规则
+        runs_all = self.repo.list_runs(etf_code='515220', latest_only=False)['records']
+        days_all_seq = [r['backtest_days'] for r in runs_all]
+        self.assertEqual(days_all_seq, [1825, 1095, 365, 90])
+
+    def test_save_run_created_at_is_local_time_and_migration(self):
+        """测试新保存记录的时间戳为当前本地时间，且迁移自愈能自动修复UTC偏差旧记录"""
+        from datetime import datetime
+        dummy_result = {
+            'summary': {'strategy_return': 8.0, 'grid_cash_profit': 800.0},
+            'profit_pool': {'free_shares': 0},
+            'equity_curve': [],
+            'total_trades_all': []
+        }
+        now_local = datetime.now()
+        run_id = self.repo.save_run('510300', '沪深300', 180, 50000.0, 'atr', 'cash', dummy_result)
+        rec = self.repo.get_run_detail(run_id)
+        self.assertIsNotNone(rec)
+        assert rec is not None
+        # 验证包含当前本地日期和小时
+        self.assertIn(now_local.strftime('%Y-%m-%d'), rec['created_at'])
+        self.assertIn(f"{now_local.hour:02d}:", rec['created_at'])
+
+        # 模拟一条因历史 SQLite 导致落后 8 小时的记录
+        fake_run_id = "run_20260912_200000_123456"
+        utc_created_at = "2026-09-12 12:00:00"  # 落后 8 小时
+        with self.repo._get_connection() as conn:
+            conn.cursor().execute("""
+                INSERT INTO backtest_runs (
+                    run_id, etf_code, etf_name, backtest_days, actual_days,
+                    total_capital, step_mode, reinvest_mode,
+                    annual_return, max_drawdown, total_profit, total_trades, free_shares,
+                    is_partial_history, partial_reason,
+                    params_json, summary_json, equity_curve_json, trades_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                fake_run_id, '510300', '沪深300', 180, 180,
+                50000.0, 'atr', 'cash',
+                8.0, 5.0, 800.0, 10, 0,
+                0, None,
+                '{}', '{}', '[]', '[]', utc_created_at
+            ))
+            conn.commit()
+
+        # 触发时区自愈迁移
+        self.repo.migrate_fix_timezone_offset()
+
+        # 验证修复后的小时被校正为 20 点
+        rec_fixed = self.repo.get_run_detail(fake_run_id)
+        self.assertIsNotNone(rec_fixed)
+        assert rec_fixed is not None
+        self.assertEqual(rec_fixed['created_at'], "2026-09-12 20:00:00")
+
 
 if __name__ == '__main__':
     unittest.main()

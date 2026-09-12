@@ -41,6 +41,15 @@ export default function BacktestArchiveView({ onApplyParams }) {
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
 
+  // 格式化测算时间
+  const formatRecordTime = (timeStr) => {
+    if (!timeStr) return "-";
+    if (typeof timeStr === "string") {
+      return timeStr.replace("T", " ").replace(/\.\d+.*$/, "").slice(0, 19);
+    }
+    return String(timeStr);
+  };
+
   // 加载档案列表与标的列表
   const loadRecords = async () => {
     setLoading(true);
@@ -57,7 +66,10 @@ export default function BacktestArchiveView({ onApplyParams }) {
       ]);
 
       if (res?.success && res.data) {
-        setRecords(res.data.records || []);
+        const rawList = res.data.records || [];
+        // 按照周期最长排在最上面进行倒序展示 (5年 -> 3年 -> 2年 -> 1年 -> 半年 -> 90天)
+        const sortedList = rawList.slice().sort((a, b) => (Number(b.backtest_days) || 0) - (Number(a.backtest_days) || 0));
+        setRecords(sortedList);
       } else {
         setError(res?.error || "读取回测档案失败");
       }
@@ -308,7 +320,7 @@ export default function BacktestArchiveView({ onApplyParams }) {
                         )}
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500 mt-1.5 font-mono">
-                        <span>测算时间: {rec.created_at}</span>
+                        <span>测算时间: {formatRecordTime(rec.created_at)}</span>
                         <span>初始本金: ¥{Number(rec.total_capital).toLocaleString()}</span>
                       </div>
                     </div>
