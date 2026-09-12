@@ -237,17 +237,27 @@ class EnhancedCache:
             return {'file_count': 0, 'total_size_mb': 0, 'subdirs': [], 'error': str(e)}
 
     def get_valuation_baseline(self) -> Dict[str, Any]:
-        """获取本地内置的 10 年官方估值基准底表数据"""
+        """获取本地内置的官方估值基准底表数据（优先加载最新快照底表）"""
+        latest_file = os.path.join(os.path.dirname(__file__), '../../data/index_valuation_snapshot_latest.json')
         baseline_file = os.path.join(os.path.dirname(__file__), '../../data/csindex_pe_history_10y.json')
-        if not os.path.exists(baseline_file):
-            logger.warning(f"基准底表文件不存在: {baseline_file}")
-            return {}
-        try:
-            with open(baseline_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"读取估值基准底表失败: {str(e)}")
-            return {}
+        
+        baseline_data = {}
+        if os.path.exists(baseline_file):
+            try:
+                with open(baseline_file, 'r', encoding='utf-8') as f:
+                    baseline_data = json.load(f)
+            except Exception as e:
+                logger.error(f"读取估值基准底表失败: {str(e)}")
+
+        if os.path.exists(latest_file):
+            try:
+                with open(latest_file, 'r', encoding='utf-8') as f:
+                    latest_data = json.load(f)
+                    baseline_data['latest_snapshot'] = latest_data
+            except Exception as e:
+                logger.error(f"读取最新估值快照底表失败: {str(e)}")
+
+        return baseline_data
 
     def get_valuation_cache(self, etf_code: str, trade_date: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """获取交易日估值缓存"""

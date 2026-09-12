@@ -7,11 +7,14 @@ import {
   Snowflake,
   Layers,
   Sparkles,
-  Percent
+  Percent,
+  Scale,
+  TrendingDown,
+  Coins
 } from "lucide-react";
 
 /**
- * 标的历史估值温度计与安全边际卡片
+ * 标的历史估值温度计与大底安全边际卡片 (支持 5y/10y 双周期、ERP 与行业自适应)
  */
 const ValuationGaugeCard = ({ valuation }) => {
   if (!valuation) return null;
@@ -19,10 +22,11 @@ const ValuationGaugeCard = ({ valuation }) => {
   const {
     index_code,
     index_name,
+    industry_type = "broad_balanced",
     current_pe,
     pe_percentile = 50.0,
     current_pb,
-    pb_percentile,
+    pb_percentile = 50.0,
     dividend_yield,
     temperature = 50.0,
     tier = "适温合理",
@@ -33,7 +37,10 @@ const ValuationGaugeCard = ({ valuation }) => {
     fatal_flaw_reason,
     is_fallback = false,
     source = "csindex_official",
-    trade_date = ""
+    trade_date = "",
+    safe_score,
+    erp_info,
+    valuation_matrix
   } = valuation;
 
   // 五档温度样式映射
@@ -76,6 +83,19 @@ const ValuationGaugeCard = ({ valuation }) => {
   const badgeStyle = getTierBadge();
   const clampedTemp = Math.max(1, Math.min(99, Number(temperature)));
 
+  // 行业自适应标签
+  const getIndustryLabel = () => {
+    if (industry_type === "cyclical_asset") return "周期重资产与大金融 (PB/股息主导)";
+    if (industry_type === "tech_growth") return "高景气科技与轻资产 (PE/PS主导)";
+    return "全市场宽基 (PE/PB均衡加权)";
+  };
+
+  const pe5y = valuation_matrix?.pe?.pct_5y ?? pe_percentile;
+  const pe10y = valuation_matrix?.pe?.pct_10y ?? pe_percentile;
+  const pb5y = valuation_matrix?.pb?.pct_5y ?? pb_percentile;
+  const pb10y = valuation_matrix?.pb?.pct_10y ?? pb_percentile;
+  const ps5y = valuation_matrix?.ps?.pct_5y ?? 50.0;
+
   return (
     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm mb-6 transition-all hover:shadow-md">
       {/* 头部标题与元信息 */}
@@ -87,25 +107,31 @@ const ValuationGaugeCard = ({ valuation }) => {
           <div>
             <div className="flex items-center space-x-2">
               <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-                标的历史估值温度计与开网安全边际
+                标的历史估值温度计与大底安全边际
               </h3>
               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${badgeStyle.bg}`}>
                 {badgeStyle.icon}
                 {tier}
               </span>
+              {safe_score !== undefined && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-800/60">
+                  安全指数: {safe_score}分
+                </span>
+              )}
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-2">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">
               <span>跟踪指数：{index_name} ({index_code})</span>
+              <span>· 行业属性：{getIndustryLabel()}</span>
               {trade_date && <span>· 更新日期：{trade_date}</span>}
               <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
-                {source === "csindex_official" ? "中证官方披露" : is_fallback ? "内置10年基准底表" : source}
+                {source === "danjuan_official" ? "雪球官方双周期全量源" : source === "csindex_official" ? "中证官方披露" : is_fallback ? "内置基准底表" : source}
               </span>
             </p>
           </div>
         </div>
 
         {/* 建议底仓胶囊 */}
-        <div className="flex items-center bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 rounded-xl px-3.5 py-2">
+        <div className="flex items-center bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700/80 rounded-xl px-3.5 py-2 shrink-0">
           <Layers className="w-4 h-4 text-indigo-500 mr-2" />
           <div className="text-right">
             <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">建议初始底仓</div>
@@ -132,10 +158,10 @@ const ValuationGaugeCard = ({ valuation }) => {
         <div className="flex justify-between items-center text-xs mb-2">
           <span className="text-slate-600 dark:text-slate-400 font-medium flex items-center">
             <Percent className="w-3.5 h-3.5 mr-1 text-slate-400" />
-            10年历史估值百分位标尺
+            宏观与历史大底综合安全分位标尺
           </span>
           <span className="font-bold text-slate-900 dark:text-slate-100">
-            当前分位: <span className="text-indigo-600 dark:text-indigo-400 text-sm">{pe_percentile}%</span> ({tier})
+            综合温度: <span className="text-indigo-600 dark:text-indigo-400 text-sm">{clampedTemp}%</span> ({tier})
           </span>
         </div>
 
@@ -171,40 +197,73 @@ const ValuationGaugeCard = ({ valuation }) => {
         </div>
       </div>
 
-      {/* 四大核心量化指标卡片 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-        <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-xl p-3 border border-slate-100 dark:border-slate-800">
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">滚动市盈率 (PE-TTM)</div>
-          <div className="text-base font-bold text-slate-900 dark:text-slate-100">
-            {current_pe > 0 ? `${current_pe} 倍` : "--"}
+      {/* 5y/10y 双周期高精度估值矩阵卡片 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 mb-5">
+        {/* 市盈率 PE 卡片 */}
+        <div className="bg-slate-50/90 dark:bg-slate-800/40 rounded-xl p-3.5 border border-slate-100 dark:border-slate-800">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">市盈率 (PE-TTM)</span>
+            <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              {current_pe > 0 ? `${current_pe} 倍` : "--"}
+            </span>
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">历史分位: {pe_percentile}%</div>
+          <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+            <div>
+              <span className="text-[11px] text-slate-500 block">近5年百分位</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200">{pe5y}%</span>
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-500 block">近10年百分位</span>
+              <span className="font-bold text-indigo-600 dark:text-indigo-400">{pe10y}%</span>
+            </div>
+          </div>
         </div>
 
-        <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-xl p-3 border border-slate-100 dark:border-slate-800">
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">市净率 (PB)</div>
-          <div className="text-base font-bold text-slate-900 dark:text-slate-100">
-            {current_pb > 0 ? `${current_pb} 倍` : "--"}
+        {/* 市净率 PB 卡片 */}
+        <div className="bg-slate-50/90 dark:bg-slate-800/40 rounded-xl p-3.5 border border-slate-100 dark:border-slate-800">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">市净率 (PB)</span>
+            <span className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              {current_pb > 0 ? `${current_pb} 倍` : "--"}
+            </span>
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">
-            {pb_percentile ? `历史分位: ${pb_percentile}%` : "账面净资产倍数"}
+          <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+            <div>
+              <span className="text-[11px] text-slate-500 block">近5年百分位</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200">{pb5y}%</span>
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-500 block">近10年百分位</span>
+              <span className="font-bold text-indigo-600 dark:text-indigo-400">{pb10y}%</span>
+            </div>
           </div>
         </div>
 
-        <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-xl p-3 border border-slate-100 dark:border-slate-800">
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">总股本股息率 (D/P)</div>
-          <div className="text-base font-bold text-emerald-600 dark:text-emerald-400">
-            {dividend_yield > 0 ? `${dividend_yield}%` : "--"}
+        {/* 现金股息率与宏观利差 ERP 卡片 */}
+        <div className="bg-slate-50/90 dark:bg-slate-800/40 rounded-xl p-3.5 border border-slate-100 dark:border-slate-800">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center">
+              <Coins className="w-3.5 h-3.5 mr-1 text-emerald-500" />
+              股息率 & 股债利差
+            </span>
+            <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+              {dividend_yield > 0 ? `${dividend_yield}%` : "--"}
+            </span>
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">年度现金分红垫</div>
-        </div>
-
-        <div className="bg-slate-50/80 dark:bg-slate-800/40 rounded-xl p-3 border border-slate-100 dark:border-slate-800">
-          <div className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">安全边际评级</div>
-          <div className="text-base font-bold text-indigo-600 dark:text-indigo-400">
-            {description ? description.slice(0, 8) : tier}
+          <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-200/60 dark:border-slate-700/60">
+            <div>
+              <span className="text-[11px] text-slate-500 block">股债利差 (ERP)</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200">
+                {erp_info ? `${erp_info.erp_value}%` : "--"}
+              </span>
+            </div>
+            <div>
+              <span className="text-[11px] text-slate-500 block">大底宏观评级</span>
+              <span className="font-bold text-indigo-600 dark:text-indigo-400 truncate block">
+                {erp_info?.level ? erp_info.level.slice(0, 8) : "安全边际良好"}
+              </span>
+            </div>
           </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">胜率与赔率模型</div>
         </div>
       </div>
 
