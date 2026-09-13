@@ -11,6 +11,7 @@ from backend.services.analysis.grid_fit_service import (
     PROTOCOL_VERSION,
     GridFitBoardService,
     annualized_grid_cash_yield,
+    build_protocol_callbacks,
     protocol_runner_avoids_archive,
 )
 
@@ -142,6 +143,9 @@ class TestGridFitBoard(unittest.TestCase):
         self.assertEqual(len(self.repo.list_runs(PROTOCOL_VERSION)), 2)
         self.assertTrue(protocol_runner_avoids_archive())
         self.assertNotIn("save_run", inspect.getsource(refresh_grid_fit))
+        callback_source = inspect.getsource(build_protocol_callbacks)
+        self.assertIn("sync_window_history", callback_source)
+        self.assertNotIn("sync_full_history", callback_source)
 
     def test_sync_failure_does_not_hide_completed_rows(self):
         def sync_fn(code):

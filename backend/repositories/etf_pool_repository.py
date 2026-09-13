@@ -312,37 +312,6 @@ class ETFPoolRepository:
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5,
     ) -> List[Dict[str, str]]:
-        """11 个可购赛道并集。不受雷达 200 条上限约束，不含未归类。"""
-        try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
-                cursor.execute(
-                    f"""
-                    SELECT etf_code, name, sector FROM etf_pool_metadata
-                    WHERE amount_ma20_10k >= ? AND atr_pct >= ?
-                      AND sector IN ({placeholders})
-                    ORDER BY sector, etf_code
-                """,
-                    (min_ma20_amount_10k, min_atr_pct, *SHOPPABLE_SECTORS),
-                )
-                return [
-                    {
-                        "etf_code": row["etf_code"],
-                        "etf_name": row["name"],
-                        "sector": row["sector"],
-                    }
-                    for row in cursor.fetchall()
-                ]
-        except Exception as e:
-            logger.error(f"读取适合度榜宇宙失败: {e}")
-            return []
-
-    def list_shoppable_universe(
-        self,
-        min_ma20_amount_10k: float = 3000.0,
-        min_atr_pct: float = 1.5,
-    ) -> List[Dict[str, str]]:
         """核心池 11 个可购赛道并集。不受雷达 200 条上限约束，不含未归类。"""
         try:
             with self._get_connection() as conn:
@@ -368,6 +337,25 @@ class ETFPoolRepository:
         except Exception as e:
             logger.error(f"读取适合度榜宇宙失败: {e}")
             return []
+
+    def find_name(self, etf_code: str) -> Optional[str]:
+        """按代码取池内名称。不打行情接口。"""
+        clean_code = str(etf_code or "").split(".")[0].strip()
+        if not clean_code:
+            return None
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT name FROM etf_pool_metadata WHERE etf_code = ?",
+                    (clean_code,),
+                )
+                row = cursor.fetchone()
+                if row and row["name"]:
+                    return str(row["name"])
+        except Exception as e:
+            logger.warning(f"读取标的名称失败 ({clean_code}): {e}")
+        return None
 
     def list_sector_map(self) -> Dict[str, str]:
         """返回可购赛道代码映射。未归类与其他主题不在映射中，调用方记为未入池。"""

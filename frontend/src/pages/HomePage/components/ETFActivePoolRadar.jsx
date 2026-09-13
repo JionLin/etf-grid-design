@@ -32,26 +32,30 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
 
   // 加载全市场做 T 标的池
   useEffect(() => {
-    fetchPoolData();
+    const controller = new AbortController();
+    fetchPoolData(controller.signal);
+    return () => controller.abort();
   }, [selectedSector, onlyT0, selectedElasticity]);
 
-  const fetchUnclassified = async () => {
+  const fetchUnclassified = async (signal) => {
     try {
       const params = new URLSearchParams();
       params.append("sector", "未归类");
       params.append("min_ma20_amount", "3000");
       params.append("min_atr", "1.5");
-      const res = await fetch(`/api/etf/pool?${params.toString()}`);
+      const res = await fetch(`/api/etf/pool?${params.toString()}`, { signal });
       const json = await res.json();
+      if (signal?.aborted) return;
       if (json.success && json.data) {
         setUnclassifiedItems(json.data.items || []);
       }
     } catch (e) {
+      if (e?.name === "AbortError") return;
       console.error("加载未归类标的失败:", e);
     }
   };
 
-  const fetchPoolData = async () => {
+  const fetchPoolData = async (signal) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
@@ -62,15 +66,17 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
       params.append("min_ma20_amount", "3000");
       params.append("min_atr", "1.5");
 
-      const res = await fetch(`/api/etf/pool?${params.toString()}`);
+      const res = await fetch(`/api/etf/pool?${params.toString()}`, { signal });
       const json = await res.json();
+      if (signal?.aborted) return;
       if (json.success && json.data) {
         setPoolData(json.data);
       }
     } catch (e) {
+      if (e?.name === "AbortError") return;
       console.error("加载标的池失败:", e);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   };
 

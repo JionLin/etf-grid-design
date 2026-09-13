@@ -20,6 +20,7 @@ import {
   getBacktestRecordDetail,
   deleteBacktestRecord,
   getBacktestDistinctETFs,
+  isAbortError,
 } from "@shared/services/api";
 import {
   ARCHIVE_SECTORS,
@@ -60,7 +61,18 @@ export default function BacktestArchiveView({ onApplyParams }) {
   };
 
   // 加载档案列表与标的列表
-  const loadRecords = async () => {
+  const loadDistinctEtfs = async () => {
+    try {
+      const etfRes = await getBacktestDistinctETFs();
+      if (etfRes?.success && etfRes.data) {
+        setDistinctEtfs(etfRes.data || []);
+      }
+    } catch (err) {
+      console.error("读取已测标的失败:", err);
+    }
+  };
+
+  const loadRecords = async (signal) => {
     setLoading(true);
     setError(null);
     try {
@@ -71,33 +83,32 @@ export default function BacktestArchiveView({ onApplyParams }) {
         sector: selectedSector,
         stepMode: selectedStepMode,
       });
-
-      const [res, etfRes] = await Promise.all([
-        getBacktestRecords(params),
-        getBacktestDistinctETFs(),
-      ]);
+      const res = await getBacktestRecords(params, { signal });
+      if (signal?.aborted) return;
 
       if (res?.success && res.data) {
         const rawList = res.data.records || [];
-        // 按照周期最长排在最上面进行倒序展示 (5年 -> 3年 -> 2年 -> 1年 -> 半年 -> 90天)
         const sortedList = rawList.slice().sort((a, b) => (Number(b.backtest_days) || 0) - (Number(a.backtest_days) || 0));
         setRecords(sortedList);
       } else {
         setError(res?.error || "读取回测档案失败");
       }
-
-      if (etfRes?.success && etfRes.data) {
-        setDistinctEtfs(etfRes.data || []);
-      }
     } catch (err) {
+      if (isAbortError(err) || signal?.aborted) return;
       setError(err?.message || "网络请求异常");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   };
 
   useEffect(() => {
-    loadRecords();
+    loadDistinctEtfs();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadRecords(controller.signal);
+    return () => controller.abort();
   }, [selectedEtf, selectedDays, latestOnly, selectedSector, selectedStepMode]);
 
   // 切换展开/收起详情
@@ -134,6 +145,7 @@ export default function BacktestArchiveView({ onApplyParams }) {
       if (res?.success) {
         setRecords((prev) => prev.filter((r) => r.run_id !== runId));
         if (expandedRunId === runId) setExpandedRunId(null);
+        loadDistinctEtfs();
       } else {
         alert(res?.error || "删除失败");
       }

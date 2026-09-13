@@ -159,32 +159,36 @@ const ParameterForm = forwardRef(function ParameterForm(
 
   // ETF代码变化时获取基础信息
   useEffect(() => {
-    if (etfCode && etfCode.length === 6) {
-      setEtfLoading(true);
-      setEtfInfo(null);
-
-      fetch(`/api/etf/basic-info/${etfCode}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.success) {
-            setEtfInfo(data.data);
-            setErrors((prev) => ({ ...prev, etfCode: "" }));
-          } else {
-            setEtfInfo(null);
-            setErrors((prev) => ({ ...prev, etfCode: data.error }));
-          }
-        })
-        .catch((err) => {
-          setEtfInfo(null);
-          setErrors((prev) => ({ ...prev, etfCode: "获取ETF信息失败" }));
-        })
-        .finally(() => {
-          setEtfLoading(false);
-        });
-    } else {
+    if (!(etfCode && etfCode.length === 6)) {
       setEtfInfo(null);
       setEtfLoading(false);
+      return undefined;
     }
+    const controller = new AbortController();
+    setEtfLoading(true);
+    setEtfInfo(null);
+
+    fetch(`/api/etf/basic-info/${etfCode}`, { signal: controller.signal })
+      .then((res) => res.json())
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        if (data.success) {
+          setEtfInfo(data.data);
+          setErrors((prev) => ({ ...prev, etfCode: "" }));
+        } else {
+          setEtfInfo(null);
+          setErrors((prev) => ({ ...prev, etfCode: data.error }));
+        }
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError" || controller.signal.aborted) return;
+        setEtfInfo(null);
+        setErrors((prev) => ({ ...prev, etfCode: "获取ETF信息失败" }));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setEtfLoading(false);
+      });
+    return () => controller.abort();
   }, [etfCode]);
 
   // E大原版步长防呆校验

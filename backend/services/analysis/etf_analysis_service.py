@@ -178,6 +178,28 @@ class ETFAnalysisService:
         except Exception as e:
             logger.error(f"获取ETF基础信息失败: {etf_code}, {str(e)}")
             raise
+
+    def resolve_etf_name(self, etf_code: str) -> str:
+        """归档和回测只取名称。先看标的池和名称缓存，不拉全市场现货。"""
+        pool_repo = getattr(self.akshare_client, "pool_repo", None)
+        if pool_repo is not None and hasattr(pool_repo, "find_name"):
+            pooled = pool_repo.find_name(etf_code)
+            if pooled:
+                return pooled
+        cache = getattr(self.akshare_client, "cache", None)
+        if cache is not None:
+            cached = cache.get_permanent_cache("etf_name", etf_code)
+            if cached:
+                return str(cached)
+        return etf_code
+
+    def _current_atr_ratio(self, df: pd.DataFrame) -> float:
+        """回测只需要当前 ATR 比率，不跑适宜度全文。"""
+        processed = self.atr_analyzer.calculator.calculate_atr(df.copy())
+        ratio = processed.iloc[-1].get("atr_ratio")
+        if ratio is None or pd.isna(ratio):
+            raise ValueError("无法从历史K线计算ATR比率")
+        return float(ratio)
     
     def get_historical_data(self, etf_code: str, days: int = 365) -> pd.DataFrame:
         """
@@ -245,16 +267,17 @@ class ETFAnalysisService:
             logger.info(f"开始ETF策略分析: {etf_code}, 资金{total_capital}, "
                        f"{grid_type}网格, {risk_preference}, 调节系数{adjustment_coefficient}, 周期{analysis_days}天")
             
-            # 1. 获取ETF基础信息
+            # 1. 获取ETF基础信息（内部已取过一次最新价）
             etf_info = self.get_etf_basic_info(etf_code)
+            latest_price_info = {
+                "current_price": etf_info.get("current_price"),
+                "timestamp": etf_info.get("trade_timestamp", ""),
+            }
+            if latest_price_info["current_price"] in (None, ""):
+                raise ValueError(f"未获取到ETF最新价格: {etf_code}")
             
             # 2. 获取历史数据（根据指定天数，默认180天）
             df = self.get_historical_data(etf_code, days=analysis_days)
-            
-            # 3. 获取最新价格信息
-            latest_price_info = self.akshare_client.get_latest_price(etf_code)
-            if not latest_price_info:
-                raise ValueError(f"未获取到ETF最新价格: {etf_code}")
             
             # 4. 执行适宜度评估（只看网格体格，不引入估值）
             suitability_result = self.suitability_analyzer.comprehensive_evaluation(df, etf_info)
@@ -651,6 +674,8 @@ class ETFAnalysisService:
         eda_step_ratios: Optional[Dict[str, float]] = None,
         custom_base_price: Optional[float] = None,
         atr_multipliers: Optional[Dict[str, float]] = None,
+        atr_ratio: Optional[float] = None,
+        etf_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         运行策略历史回测
@@ -699,10 +724,9 @@ class ETFAnalysisService:
                 anchor_mode = "inception_open"
 
             current_price = float(df.iloc[-1]['close'])
-            etf_info = self.get_etf_basic_info(etf_code) or {'code': etf_code, 'name': etf_code}
-            suitability = self.suitability_analyzer.comprehensive_evaluation(df, etf_info)
-            atr_analysis = suitability['atr_analysis']
-            atr_ratio = atr_analysis['current_atr_ratio']
+            resolved_name = etf_name or self.resolve_etf_name(etf_code)
+            if atr_ratio is None:
+                atr_ratio = self._current_atr_ratio(df)
 
             # 以当年真实基准价格 backtest_base_price 展开回测网格阶梯
             composite_steps = self.grid_optimizer.calculate_composite_steps(
@@ -736,6 +760,8 @@ class ETFAnalysisService:
                 'backtest_base_price': round(backtest_base_price, 3),
                 'anchor_mode': anchor_mode,
                 'latest_market_price': round(current_price, 3),
+                'etf_name': resolved_name,
+                'atr_ratio': atr_ratio,
             }
             backtest_res['history_meta'] = history_meta
             if 'summary' in backtest_res and isinstance(backtest_res['summary'], dict):

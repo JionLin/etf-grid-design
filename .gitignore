@@ -209,3 +209,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# 本地行情库与 WAL。运行时生成，不入库。
+*.db
+*.db-wal
+*.db-shm
+*.db-journal

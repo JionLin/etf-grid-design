@@ -4,7 +4,7 @@ import { Helmet } from "react-helmet-async";
 import { Share2, ArrowLeft, AlertTriangle } from "lucide-react";
 import AnalysisReport from "@features/analysis/components/AnalysisReport";
 import DisclaimerModal from "@features/analysis/components/DisclaimerModal";
-import { analyzeETF } from "@shared/services/api";
+import { analyzeETF, isAbortError } from "@shared/services/api";
 import {
   parseAnalysisURL,
   validateAndCompleteParams,
@@ -35,6 +35,7 @@ const AnalysisPage = () => {
 
   // 引用
   const parameterFormRef = useRef(null);
+  const analysisAbortRef = useRef(null);
 
   // 初始化和URL参数解析
   useEffect(() => {
@@ -58,10 +59,11 @@ const AnalysisPage = () => {
     setParamErrors(validation.errors);
     setCurrentParams(validation.params);
 
-    // 如果参数被修正，更新URL
+    // 参数被修正时先改 URL，下一轮再分析，避免同一份请求打两次
     if (validation.errors.length > 0) {
       const newSearchParams = encodeAnalysisParams(validation.params);
       setSearchParams(newSearchParams, { replace: true });
+      return;
     }
 
     // 检查免责声明状态
@@ -77,10 +79,14 @@ const AnalysisPage = () => {
 
   // 执行分析
   const handleAnalysis = async (parameters) => {
+    analysisAbortRef.current?.abort();
+    const controller = new AbortController();
+    analysisAbortRef.current = controller;
     setLoading(true);
 
     try {
-      const response = await analyzeETF(parameters);
+      const response = await analyzeETF(parameters, { signal: controller.signal });
+      if (controller.signal.aborted) return;
 
       if (response.success) {
         setAnalysisData(response.data);
@@ -97,13 +103,16 @@ const AnalysisPage = () => {
         throw new Error(response.error || "分析失败");
       }
     } catch (error) {
+      if (isAbortError(error) || controller.signal.aborted) return;
       console.error("分析请求失败:", error);
       setAnalysisData({
         error: true,
         message: error.message || "分析请求失败，请稍后重试",
       });
     } finally {
-      setLoading(false);
+      if (analysisAbortRef.current === controller) {
+        setLoading(false);
+      }
     }
   };
 
@@ -339,6 +348,7 @@ const AnalysisPage = () => {
           <AnalysisReport
             data={analysisData}
             loading={loading}
+            backtestParams={currentParams}
             onBackToInput={handleBackToHome}
             onReAnalysis={handleReAnalysis}
             showShareButton={true}

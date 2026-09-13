@@ -1,6 +1,7 @@
 import akshare as ak
 import pandas as pd
 import logging
+import threading
 import time
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
@@ -13,6 +14,8 @@ except ImportError:
     from backend.repositories.etf_pool_repository import ETFPoolRepository, UNCLASSIFIED_SECTOR
 
 logger = logging.getLogger(__name__)
+
+SPOT_QUOTE_TTL_SECONDS = 45
 
 
 class AkShareClient:
@@ -28,8 +31,40 @@ class AkShareClient:
         # A股交易时间配置
         self.market_open_time = "09:30"
         self.market_close_time = "15:00"
+        self._spot_lock = threading.Lock()
+        self._spot_frame = None
+        self._spot_fetched_at = 0.0
+        self._quote_cache: Dict[str, tuple] = {}
         
         logger.info("AkShare客户端初始化成功（集成 SQLite 时序行情湖版本）")
+
+    def _fresh_quote(self, etf_code: str) -> Optional[Dict]:
+        """盘中短缓存。收盘后的日缓存仍走原有交易日缓存。"""
+        now = time.monotonic()
+        with self._spot_lock:
+            cached = self._quote_cache.get(etf_code)
+            if not cached:
+                return None
+            fetched_at, payload = cached
+            if now - fetched_at >= SPOT_QUOTE_TTL_SECONDS:
+                return None
+            return payload
+
+    def _remember_quote(self, etf_code: str, payload: Dict) -> None:
+        with self._spot_lock:
+            self._quote_cache[etf_code] = (time.monotonic(), payload)
+
+    def _load_spot_frame(self) -> pd.DataFrame:
+        """全市场现货表 45 秒内只拉一次，单代码查询共用这一份。"""
+        now = time.monotonic()
+        with self._spot_lock:
+            if self._spot_frame is not None and now - self._spot_fetched_at < SPOT_QUOTE_TTL_SECONDS:
+                return self._spot_frame
+        frame = ak.fund_etf_spot_em()
+        with self._spot_lock:
+            self._spot_frame = frame
+            self._spot_fetched_at = time.monotonic()
+        return frame
     
     def _fetch_raw_kline_network(self, etf_code: str, start_date: str, end_date: str, days: int = 180) -> Optional[pd.DataFrame]:
         """向网络接口请求原始日 K 线（优先 AkShare，网络受阻时走备用分段源）"""
@@ -208,6 +243,11 @@ class AkShareClient:
         Returns:
             Dict: 最新价格信息
         """
+        fresh_quote = self._fresh_quote(etf_code)
+        if fresh_quote:
+            logger.info(f"✓ 从短缓存获取ETF {etf_code} 最新价格")
+            return fresh_quote
+
         # 1. 获取最近收盘的交易日
         latest_trading_date = self.get_latest_trading_date()
         
@@ -215,14 +255,14 @@ class AkShareClient:
         cached_data = self.cache.get_daily_cache(latest_trading_date, "price", etf_code)
         if cached_data:
             logger.info(f"✓ 从交易日缓存获取ETF {etf_code} 最新价格 (交易日: {latest_trading_date})")
+            self._remember_quote(etf_code, cached_data)
             return cached_data
         
         # 3. 缓存未命中，调用接口
         logger.info(f"→ 交易日缓存未命中，请求AkShare接口获取ETF {etf_code} 最新价格")
         
         try:
-            # 获取ETF实时行情
-            df = ak.fund_etf_spot_em()
+            df = self._load_spot_frame()
             
             # 查找指定ETF
             etf_data = df[df['代码'] == etf_code]
@@ -331,9 +371,9 @@ class AkShareClient:
             if actual_trading_date == current_date and not self._is_market_closed(datetime.now()):
                 logger.info(f"→ 当日数据且未收盘，跳过缓存 (交易日: {actual_trading_date})")
             else:
-                # 缓存数据
                 self.cache.set_daily_cache(actual_trading_date, "price", etf_code, price_info)
-            logger.info(f"✓ ETF {etf_code} 最新价格获取成功并已缓存 (交易日: {actual_trading_date})")
+            self._remember_quote(etf_code, price_info)
+            logger.info(f"✓ ETF {etf_code} 最新价格获取成功 (交易日: {actual_trading_date})")
             
             return price_info
             
@@ -342,9 +382,25 @@ class AkShareClient:
             fallback = self._get_fallback_quote(etf_code)
             if fallback:
                 self.cache.set_daily_cache(latest_trading_date, "price", etf_code, fallback)
+                self._remember_quote(etf_code, fallback)
                 logger.info(f"✓ 通过备用行情源获取ETF {etf_code} 最新价格成功")
                 return fallback
             return None
+
+    def sync_window_history(self, etf_code: str, window_days: int = 1825) -> pd.DataFrame:
+        """按协议窗口增量补齐本地日 K。覆盖够时不打 HTTP。"""
+        safe_days = max(30, int(window_days))
+        end = datetime.now()
+        start = end - timedelta(days=safe_days)
+        frame = self._sync_and_fill_kline_lake(
+            etf_code,
+            start.strftime("%Y%m%d"),
+            end.strftime("%Y%m%d"),
+            days=safe_days,
+        )
+        if frame is None or frame.empty:
+            return pd.DataFrame()
+        return frame
     
     
     def get_trading_calendar(self, start_date: str, end_date: str) -> List[str]:

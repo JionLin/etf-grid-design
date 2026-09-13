@@ -188,6 +188,41 @@ class TestAKShareClientFallbackPagination(unittest.TestCase):
             assert res_df is not None
             self.assertTrue(len(res_df) > 0)
 
+    def test_spot_frame_is_reused_within_ttl(self):
+        """盘中同一份现货表只拉一次，单代码查询走短缓存。"""
+        frame = pd.DataFrame([{
+            "代码": "515220",
+            "名称": "煤炭ETF",
+            "最新价": 1.23,
+            "昨收": 1.20,
+            "涨跌幅": 2.5,
+            "成交量": 1000,
+            "成交额": 2000,
+            "开盘价": 1.21,
+            "最高价": 1.24,
+            "最低价": 1.19,
+            "涨跌额": 0.03,
+            "振幅": 4.0,
+            "换手率": 1.2,
+            "量比": 1.0,
+            "IOPV实时估值": 1.23,
+            "基金折价率": 0.1,
+            "数据日期": "20260913",
+            "更新时间": 1,
+        }])
+        self.client.cache.get_daily_cache = MagicMock(return_value=None)
+        self.client.cache.set_daily_cache = MagicMock()
+        self.client.get_latest_trading_date = MagicMock(return_value="20260912")
+        self.client._is_market_closed = MagicMock(return_value=False)
+
+        with patch("backend.services.data.akshare_client.ak.fund_etf_spot_em", return_value=frame) as mock_spot:
+            first = self.client.get_latest_price("515220")
+            second = self.client.get_latest_price("515220")
+
+        self.assertEqual(first["current_price"], 1.23)
+        self.assertEqual(second["etf_name"], "煤炭ETF")
+        mock_spot.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

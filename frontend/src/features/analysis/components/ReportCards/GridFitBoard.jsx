@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
-import { getGridFitBoard, refreshGridFit } from "@shared/services/api";
+import { getGridFitBoard, isAbortError, refreshGridFit } from "@shared/services/api";
 import {
   ANNUAL_RETURN_LABEL,
   CASH_YIELD_LABEL,
@@ -56,32 +56,47 @@ export default function GridFitBoard() {
   const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const loadAbortRef = useRef(null);
 
-  const loadBoard = async (nextSector = sector) => {
-    setLoading(true);
-    setError(null);
+  const loadBoard = async (nextSector = sector, { silent = false } = {}) => {
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
+    const signal = controller.signal;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
-      const res = await getGridFitBoard(buildGridFitQuery(nextSector));
+      const res = await getGridFitBoard(buildGridFitQuery(nextSector), { signal });
+      if (signal?.aborted) return;
       if (!res?.success) {
         setError(res?.error || "读取适合度榜失败");
         return;
       }
       setPayload(res.data || null);
     } catch (err) {
+      if (isAbortError(err) || signal?.aborted) return;
       setError(err?.message || "读取适合度榜失败");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted && !silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadBoard(sector);
+    return () => loadAbortRef.current?.abort();
   }, [sector]);
 
   useEffect(() => {
     if (payload?.job?.status !== "running") return undefined;
-    const timer = setInterval(() => loadBoard(sector), 5000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => {
+      loadBoard(sector, { silent: true });
+    }, 5000);
+    return () => {
+      clearInterval(timer);
+      loadAbortRef.current?.abort();
+    };
   }, [payload?.job?.status, sector]);
 
   const handleRefresh = async () => {

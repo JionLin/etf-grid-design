@@ -304,31 +304,38 @@ class BacktestRepository:
             conditions.append("step_mode NOT IN ('atr', 'fixed_eda')")
 
         step_window = "CASE WHEN step_mode IN ('atr', 'fixed_eda') THEN step_mode ELSE 'unknown' END"
-        select_cols = """
-            run_id, created_at, etf_code, etf_name, backtest_days, actual_days,
-            total_capital, step_mode, reinvest_mode,
-            annual_return, max_drawdown, total_profit, total_trades, free_shares,
-            is_partial_history, partial_reason, params_json, id
+        list_cols = """
+            b.run_id, b.created_at, b.etf_code, b.etf_name, b.backtest_days, b.actual_days,
+            b.total_capital, b.step_mode, b.reinvest_mode,
+            b.annual_return, b.max_drawdown, b.total_profit, b.total_trades, b.free_shares,
+            b.is_partial_history, b.partial_reason, b.id
         """
+        where_sql = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         if latest_only:
             query = f"""
-                SELECT {select_cols}
-                FROM (
-                    SELECT *,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY etf_code, backtest_days, {step_window}
-                            ORDER BY id DESC
-                        ) as rn
-                    FROM backtest_runs
+                SELECT {list_cols}
+                FROM backtest_runs b
+                INNER JOIN (
+                    SELECT id FROM (
+                        SELECT id,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY etf_code, backtest_days, {step_window}
+                                ORDER BY id DESC
+                            ) AS rn
+                        FROM backtest_runs
+                        {where_sql}
+                    ) ranked
+                    WHERE rn = 1
+                ) latest ON latest.id = b.id
+                ORDER BY b.backtest_days DESC, b.id DESC
             """
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
-            query += ") WHERE rn = 1 ORDER BY backtest_days DESC, id DESC"
         else:
-            query = f"SELECT {select_cols} FROM backtest_runs"
-            if conditions:
-                query += " WHERE " + " AND ".join(conditions)
-            query += " ORDER BY backtest_days DESC, id DESC"
+            query = f"""
+                SELECT {list_cols}
+                FROM backtest_runs b
+                {where_sql}
+                ORDER BY b.backtest_days DESC, b.id DESC
+            """
 
         sector_lookup = sector_map or {}
         conn = self._get_connection()
@@ -342,15 +349,10 @@ class BacktestRepository:
         records = []
         for row in rows:
             item = dict(row)
-            item.pop("id", None)
             mapped_sector = sector_lookup.get(item["etf_code"])
             item["sector"] = mapped_sector or "未入池"
             item["step_label"] = self.step_label(item.get("step_mode"))
             item["is_partial_history"] = bool(item["is_partial_history"])
-            try:
-                item["params"] = json.loads(item.get("params_json") or "{}")
-            except Exception:
-                item["params"] = {}
             if sector and item["sector"] != sector:
                 continue
             records.append(item)
@@ -358,7 +360,38 @@ class BacktestRepository:
         total = len(records)
         start = max(0, offset)
         end = start + max(1, min(200, limit))
-        return {"total": total, "records": records[start:end]}
+        page = records[start:end]
+        self._attach_page_params(page)
+        for item in page:
+            item.pop("id", None)
+        return {"total": total, "records": page}
+
+    def _attach_page_params(self, page: List[Dict[str, Any]]) -> None:
+        """只给当前页补 params，避免列表把净值曲线和成交 JSON 整表读出来。"""
+        if not page:
+            return
+        ids = [item["id"] for item in page if item.get("id") is not None]
+        if not ids:
+            for item in page:
+                item["params"] = {}
+            return
+        placeholders = ",".join("?" for _ in ids)
+        conn = self._get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT id, params_json FROM backtest_runs WHERE id IN ({placeholders})",
+                ids,
+            )
+            payloads = {row["id"]: row["params_json"] for row in cursor.fetchall()}
+        finally:
+            conn.close()
+        for item in page:
+            raw = payloads.get(item.get("id"))
+            try:
+                item["params"] = json.loads(raw or "{}")
+            except Exception:
+                item["params"] = {}
 
     def get_run_detail(self, run_id: str) -> Optional[Dict[str, Any]]:
         """获取单次回测全量详情，反序列化 json 字段实现即时无损还原"""

@@ -314,8 +314,7 @@ def run_backtest():
 
         # 自动归档至本地 SQLite 回测档案库
         try:
-            etf_info = etf_service.get_etf_basic_info(etf_code) or {}
-            etf_name = etf_info.get('name', etf_code)
+            etf_name = etf_service.resolve_etf_name(etf_code)
             run_id = backtest_repo.save_run(
                 etf_code=etf_code,
                 etf_name=etf_name,

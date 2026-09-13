@@ -14,7 +14,7 @@ class TestBacktestRoutes(unittest.TestCase):
 
     @patch('backend.api.routes.analysis_routes.etf_service')
     def test_backtest_auto_save_and_routes(self, mock_service):
-        mock_service.get_etf_basic_info.return_value = {'code': '512170', 'name': '医疗ETF'}
+        mock_service.resolve_etf_name.return_value = '医疗ETF'
         mock_service.run_strategy_backtest.return_value = {
             'summary': {
                 'annualized_return': 18.5,

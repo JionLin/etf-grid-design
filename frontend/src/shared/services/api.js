@@ -44,22 +44,24 @@ class ApiService {
   /**
    * GET请求
    */
-  async get(endpoint, params = {}) {
+  async get(endpoint, params = {}, options = {}) {
     const queryString = new URLSearchParams(params).toString();
     const url = queryString ? `${endpoint}?${queryString}` : endpoint;
 
     return this.request(url, {
       method: "GET",
+      signal: options.signal,
     });
   }
 
   /**
    * POST请求
    */
-  async post(endpoint, data = {}) {
+  async post(endpoint, data = {}, options = {}) {
     return this.request(endpoint, {
       method: "POST",
       body: JSON.stringify(data),
+      signal: options.signal,
     });
   }
 
@@ -75,15 +77,15 @@ class ApiService {
   /**
    * ETF分析主接口
    */
-  async analyzeETF(parameters) {
-    return this.post("/analyze", parameters);
+  async analyzeETF(parameters, options = {}) {
+    return this.post("/analyze", parameters, options);
   }
 
   /**
    * 策略真实历史回测接口
    */
-  async runBacktest(parameters) {
-    return this.post("/backtest", parameters);
+  async runBacktest(parameters, options = {}) {
+    return this.post("/backtest", parameters, options);
   }
 
   /**
@@ -142,8 +144,8 @@ class ApiService {
   /**
    * 获取回测档案列表
    */
-  async getBacktestRecords(params = {}) {
-    return this.get("/backtest/records", params);
+  async getBacktestRecords(params = {}, options = {}) {
+    return this.get("/backtest/records", params, options);
   }
 
   /**
@@ -163,15 +165,15 @@ class ApiService {
   /**
    * 获取档案库已测试标的列表
    */
-  async getBacktestDistinctETFs() {
-    return this.get("/backtest/distinct-etfs");
+  async getBacktestDistinctETFs(options = {}) {
+    return this.get("/backtest/distinct-etfs", {}, options);
   }
 
   /**
    * 适合度榜。与个人回测档案不是同一份列表。
    */
-  async getGridFitBoard(params = {}) {
-    return this.get("/grid-fit/board", params);
+  async getGridFitBoard(params = {}, options = {}) {
+    return this.get("/grid-fit/board", params, options);
   }
 
   async refreshGridFit() {
@@ -183,8 +185,12 @@ class ApiService {
 const apiService = new ApiService();
 
 // 导出常用方法
-export const analyzeETF = (parameters) => apiService.analyzeETF(parameters);
-export const runBacktest = (parameters) => apiService.runBacktest(parameters);
+export const analyzeETF = (parameters, options) => apiService.analyzeETF(parameters, options);
+export const runBacktest = (parameters, options) => apiService.runBacktest(parameters, options);
+
+export function isAbortError(error) {
+  return error?.name === "AbortError";
+}
 export const getEdaLiterature = () => apiService.getEdaLiterature();
 export const getETFInfo = (etfCode) => apiService.getETFInfo(etfCode);
 export const getPopularETFs = () => apiService.getPopularETFs();
@@ -193,11 +199,11 @@ export const getHistoricalData = (etfCode, startDate, endDate) =>
   apiService.getHistoricalData(etfCode, startDate, endDate);
 export const healthCheck = () => apiService.healthCheck();
 export const getVersion = () => apiService.getVersion();
-export const getBacktestRecords = (params) => apiService.getBacktestRecords(params);
+export const getBacktestRecords = (params, options) => apiService.getBacktestRecords(params, options);
 export const getBacktestRecordDetail = (runId) => apiService.getBacktestRecordDetail(runId);
 export const deleteBacktestRecord = (runId) => apiService.deleteBacktestRecord(runId);
-export const getBacktestDistinctETFs = () => apiService.getBacktestDistinctETFs();
-export const getGridFitBoard = (params) => apiService.getGridFitBoard(params);
+export const getBacktestDistinctETFs = (options) => apiService.getBacktestDistinctETFs(options);
+export const getGridFitBoard = (params, options) => apiService.getGridFitBoard(params, options);
 export const refreshGridFit = () => apiService.refreshGridFit();
 
 export default apiService;

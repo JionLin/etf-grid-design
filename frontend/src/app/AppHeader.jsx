@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { lazy, Suspense, useState, useEffect } from "react";
 import { Waypoints, Github, BookOpen } from "lucide-react";
 import { getVersion } from "@shared/services/api";
-import EdaLiteratureDrawer from "@features/literature/components/EdaLiteratureDrawer";
+
+const EdaLiteratureDrawer = lazy(() => import("@features/literature/components/EdaLiteratureDrawer"));
 
 /**
  * 应用头部组件
@@ -10,6 +11,7 @@ import EdaLiteratureDrawer from "@features/literature/components/EdaLiteratureDr
 export default function AppHeader() {
   const [version, setVersion] = useState("v1.0.0");
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [drawerMounted, setDrawerMounted] = useState(false);
 
   useEffect(() => {
     const fetchVersion = async () => {
@@ -48,7 +50,10 @@ export default function AppHeader() {
             {/* E大实战文献入口 */}
             <button
               type="button"
-              onClick={() => setIsDrawerOpen(true)}
+              onClick={() => {
+                setDrawerMounted(true);
+                setIsDrawerOpen(true);
+              }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-900 bg-gradient-to-r from-amber-100 to-amber-200/80 hover:from-amber-200 hover:to-amber-300 border border-amber-300 shadow-2xs transition-all cursor-pointer"
               title="点击阅读 E大（ETF拯救世界）网格三篇真迹"
             >
@@ -70,10 +75,14 @@ export default function AppHeader() {
       </div>
 
       {/* E大实战文献阅读抽屉 */}
-      <EdaLiteratureDrawer
-        isOpen={isDrawerOpen}
-        onClose={() => setIsDrawerOpen(false)}
-      />
+      {drawerMounted && (
+        <Suspense fallback={null}>
+          <EdaLiteratureDrawer
+            isOpen={isDrawerOpen}
+            onClose={() => setIsDrawerOpen(false)}
+          />
+        </Suspense>
+      )}
     </header>
   );
 }

@@ -105,12 +105,16 @@ def current_job_status() -> Dict[str, Optional[str]]:
 
 def build_protocol_callbacks(analysis_service, history_client):
     """协议回测只走引擎。不得调用会自动归档的个人档案接口。"""
+    prepared: Dict[str, Dict[str, Any]] = {}
 
     def sync_history(code: str):
-        return history_client.sync_full_history(code)
+        return history_client.sync_window_history(code, PROTOCOL_WINDOW_DAYS)
 
     def run_protocol(code: str, step_mode: str) -> Dict[str, Any]:
-        return analysis_service.run_strategy_backtest(
+        cached = prepared.setdefault(code, {})
+        if "name" not in cached:
+            cached["name"] = analysis_service.resolve_etf_name(code)
+        result = analysis_service.run_strategy_backtest(
             etf_code=code,
             total_capital=PROTOCOL_CAPITAL,
             backtest_days=PROTOCOL_WINDOW_DAYS,
@@ -118,7 +122,13 @@ def build_protocol_callbacks(analysis_service, history_client):
             step_mode=step_mode,
             eda_step_ratios=DEFAULT_EDA_RATIOS if step_mode == "fixed_eda" else None,
             atr_multipliers=DEFAULT_ATR_MULTIPLIERS if step_mode == "atr" else None,
+            atr_ratio=cached.get("atr_ratio"),
+            etf_name=cached.get("name"),
         )
+        meta = result.get("history_meta") or {}
+        if meta.get("atr_ratio") is not None:
+            cached["atr_ratio"] = meta["atr_ratio"]
+        return result
 
     return sync_history, run_protocol
 

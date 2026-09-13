@@ -124,10 +124,7 @@ class ATRCalculator:
             处理后的DataFrame
         """
         try:
-            # 1. 计算真实波幅
-            df = self.calculate_true_range(df)
-            
-            # 2. 计算ATR
+            # calculate_atr 内部已经计算真实波幅，避免同一份 K 线算两遍
             df = self.calculate_atr(df)
             
             logger.info("ATR数据处理完成")

@@ -20,7 +20,7 @@ import {
   Layers,
   Target,
 } from "lucide-react";
-import { runBacktest } from "@shared/services/api";
+import { isAbortError, runBacktest } from "@shared/services/api";
 
 const BacktestCard = ({
   etfCode,
@@ -46,7 +46,7 @@ const BacktestCard = ({
   const [customBasePrice, setCustomBasePrice] = useState("");
 
   // 加载回测数据
-  const fetchBacktest = async (days, forcedCustomPrice = null) => {
+  const fetchBacktest = async (days, forcedCustomPrice = null, signal) => {
     if (!etfCode) return;
     setLoading(true);
     setError(null);
@@ -66,23 +66,26 @@ const BacktestCard = ({
         edaSteps,
         atrMultipliers,
         customBasePrice: activeCustomPrice,
-      });
+      }, { signal });
+      if (signal?.aborted) return;
       if (res?.success && res.data) {
         setBacktestData(res.data);
       } else {
         setError(res?.error || "回测数据获取失败");
       }
     } catch (err) {
+      if (isAbortError(err) || signal?.aborted) return;
       setError(err?.message || "回测请求异常，请稍后重试");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (etfCode) {
-      fetchBacktest(backtestDays);
-    }
+    if (!etfCode) return undefined;
+    const controller = new AbortController();
+    fetchBacktest(backtestDays, null, controller.signal);
+    return () => controller.abort();
   }, [etfCode, safeTotalCapital, backtestDays, reinvestMode, scalingRatio, stepMode, edaStepRatios, edaSteps, atrMultipliers, anchorMode]);
 
   const summary = backtestData?.summary;
