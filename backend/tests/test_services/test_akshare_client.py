@@ -1,22 +1,17 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import pandas as pd
-import tempfile
-import os
-
 from backend.services.data.akshare_client import AkShareClient
 from backend.repositories.market_data_repository import MarketDataRepository
+from backend.repositories.mysql_connection import TEST_DATABASE
+from backend.repositories.mysql_schema import reset_business_tables
 
 
 class TestAKShareClientFallbackPagination(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = os.path.join(self.temp_dir.name, "test_market_data.db")
+        reset_business_tables(TEST_DATABASE)
         self.client = AkShareClient()
-        self.client.market_repo = MarketDataRepository(db_path=self.db_path)
-
-    def tearDown(self):
-        self.temp_dir.cleanup()
+        self.client.market_repo = MarketDataRepository(database=TEST_DATABASE)
 
     def test_get_fallback_kline_multi_page(self):
         """测试备用K线源分段循环拉取与去重合并"""
@@ -105,8 +100,8 @@ class TestAKShareClientFallbackPagination(unittest.TestCase):
         ]
         for start, end, days, bar_count in cases:
             with self.subTest(days=days):
-                case_db = os.path.join(self.temp_dir.name, f"lake_{days}.db")
-                self.client.market_repo = MarketDataRepository(db_path=case_db)
+                reset_business_tables(TEST_DATABASE)
+                self.client.market_repo = MarketDataRepository(database=TEST_DATABASE)
                 start_dt = pd.Timestamp(start)
                 records = []
                 for offset in range(bar_count):

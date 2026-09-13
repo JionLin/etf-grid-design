@@ -1,261 +1,65 @@
-import os
 import json
-import sqlite3
 import logging
-from datetime import datetime
 import uuid
-from typing import Dict, Any, List, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from .mysql_connection import DEFAULT_DATABASE, connect
+from .mysql_schema import ensure_database
 
 logger = logging.getLogger(__name__)
 
 
 class BacktestRepository:
-    """基于轻量 SQLite 的本地网格回测档案库存储引擎"""
+    """个人回测档案。摘要与曲线分表，最新一条由写入时维护。"""
 
-    def __init__(self, db_path: Optional[str] = None):
-        if db_path is None:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            db_path = os.path.join(base_dir, "data", "backtest_records.db")
+    def __init__(self, database: Optional[str] = None):
+        self.database = database or DEFAULT_DATABASE
+        ensure_database(self.database)
 
-        self.db_path = db_path
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        self._init_database()
+    def _connect(self):
+        return connect(self.database)
 
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=10.0)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_database(self):
-        """初始化数据表与 WAL 模式"""
-        try:
-            conn = self._get_connection()
-            try:
-                cursor = conn.cursor()
-                # 开启 WAL 模式提高并发性能与写入吞吐
-                cursor.execute("PRAGMA journal_mode=WAL;")
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS backtest_runs (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        run_id TEXT UNIQUE NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        etf_code TEXT NOT NULL,
-                        etf_name TEXT NOT NULL,
-                        backtest_days INTEGER NOT NULL,
-                        actual_days INTEGER NOT NULL,
-                        total_capital REAL NOT NULL,
-                        step_mode TEXT NOT NULL,
-                        reinvest_mode TEXT NOT NULL,
-                        annual_return REAL DEFAULT 0.0,
-                        max_drawdown REAL DEFAULT 0.0,
-                        total_profit REAL DEFAULT 0.0,
-                        total_trades INTEGER DEFAULT 0,
-                        free_shares INTEGER DEFAULT 0,
-                        is_partial_history INTEGER DEFAULT 0,
-                        partial_reason TEXT,
-                        params_json TEXT,
-                        summary_json TEXT,
-                        equity_curve_json TEXT,
-                        trades_json TEXT
-                    );
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_backtest_runs_etf_created 
-                    ON backtest_runs(etf_code, created_at DESC);
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_backtest_runs_created 
-                    ON backtest_runs(created_at DESC);
-                """)
-                conn.commit()
-                logger.info(f"BacktestRepository 初始化完成: {self.db_path}")
-            finally:
-                conn.close()
-            # 自动自愈修复历史数据
-            self.migrate_fix_zero_metrics()
-            self.migrate_fix_timezone_offset()
-        except Exception as e:
-            logger.error(f"初始化回测数据库失败: {str(e)}")
-            raise
+    def _get_connection(self):
+        return self._connect()
 
     def migrate_fix_timezone_offset(self):
-        """扫描并自愈历史记录中因 SQLite 默认 UTC 导致比本地时间落后 8 小时的记录"""
-        conn = self._get_connection()
+        """把 run_id 里的本地时间与 created_at 相差约 8 小时的旧记录校正回来。"""
+        conn = self._connect()
         try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, run_id, created_at FROM backtest_runs
-            """)
-            rows = cursor.fetchall()
-            updates = []
-            for row in rows:
-                rec_id = row["id"]
-                run_id = row["run_id"] or ""
-                c_at = row["created_at"] or ""
-                # run_id 格式如 run_20260912_214434_xxxx
-                parts = run_id.split("_")
-                if len(parts) >= 3 and len(parts[1]) == 8 and len(parts[2]) == 6:
-                    run_date = f"{parts[1][:4]}-{parts[1][4:6]}-{parts[1][6:]}"
-                    run_time = f"{parts[2][:2]}:{parts[2][2:4]}:{parts[2][4:]}"
-                    run_full = f"{run_date} {run_time}"
-                    try:
-                        dt_run = datetime.strptime(run_full, "%Y-%m-%d %H:%M:%S")
-                        dt_c = datetime.strptime(c_at[:19], "%Y-%m-%d %H:%M:%S")
-                        diff_hours = round((dt_run - dt_c).total_seconds() / 3600.0)
-                        if 7 <= diff_hours <= 9:
-                            fixed_c_at = dt_run.strftime("%Y-%m-%d %H:%M:%S")
-                            updates.append((fixed_c_at, rec_id))
-                    except Exception:
-                        continue
-
-            if updates:
-                cursor.executemany("""
-                    UPDATE backtest_runs 
-                    SET created_at = ? 
-                    WHERE id = ?
-                """, updates)
-                conn.commit()
-                logger.info(f"成功自愈回测历史档案时区: 共修复 {len(updates)} 条记录")
-        except Exception as e:
-            logger.warning(f"自愈回测历史档案时区失败: {e}")
-        finally:
-            conn.close()
-
-    def migrate_fix_zero_metrics(self):
-        """扫描并自愈已有历史快照中因字段错位导致 total_profit 或 annual_return 为 0 的记录"""
-        conn = self._get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT id, summary_json, actual_days 
-                FROM backtest_runs 
-                WHERE total_profit = 0.0 OR annual_return = 0.0
-            """)
-            rows = cursor.fetchall()
-            updates = []
-            for row in rows:
-                rec_id = row["id"]
-                sum_json = row["summary_json"]
-                act_days = row["actual_days"] or 180
-                if not sum_json:
-                    continue
-                try:
-                    s = json.loads(sum_json)
-                    pp = s.get("profit_pool", {})
-                    meta = s.get("history_meta", {})
-                    cal_days = meta.get("actual_calendar_days") or act_days
-
-                    raw_profit = (
-                        s.get("grid_cash_profit") 
-                        if s.get("grid_cash_profit") is not None 
-                        else pp.get("total_profit_accumulated", s.get("total_profit", 0.0))
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, run_id, created_at FROM backtest_run")
+                updates = []
+                for row in cursor.fetchall():
+                    fixed = self._fixed_created_at(row["run_id"] or "", row["created_at"] or "")
+                    if fixed:
+                        updates.append((fixed, row["id"]))
+                if updates:
+                    cursor.executemany(
+                        "UPDATE backtest_run SET created_at = %s WHERE id = %s",
+                        updates,
                     )
-                    recovered_profit = round(float(raw_profit or 0.0), 2)
-
-                    strat_ret = float(s.get("strategy_return", s.get("total_return", 0.0)))
-                    if "annualized_return" in s:
-                        recovered_annual = float(s["annualized_return"])
-                    elif cal_days > 0 and strat_ret != 0.0:
-                        recovered_annual = round(strat_ret * (365.0 / cal_days), 2)
-                    else:
-                        recovered_annual = round(strat_ret, 2)
-
-                    updates.append((recovered_annual, recovered_profit, rec_id))
-                except Exception:
-                    continue
-
-            if updates:
-                cursor.executemany("""
-                    UPDATE backtest_runs 
-                    SET annual_return = ?, total_profit = ? 
-                    WHERE id = ?
-                """, updates)
-                conn.commit()
-                logger.info(f"成功自愈回测历史档案指标: 共修复 {len(updates)} 条记录")
-        except Exception as e:
-            logger.warning(f"自愈回测历史档案指标失败: {e}")
-        finally:
-            conn.close()
-
-    def save_run(
-        self,
-        etf_code: str,
-        etf_name: str,
-        backtest_days: int,
-        total_capital: float,
-        step_mode: str,
-        reinvest_mode: str,
-        backtest_result: Dict[str, Any],
-        params: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """保存一次策略回测完整快照"""
-        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
-        summary = backtest_result.get("summary", {})
-        meta = backtest_result.get("history_meta", {}) or summary.get("history_meta", {})
-
-        actual_days = meta.get("actual_trading_days", backtest_days)
-        actual_cal_days = meta.get("actual_calendar_days") or actual_days
-        is_partial = 1 if meta.get("is_partial_history") else 0
-        partial_reason = meta.get("partial_reason")
-
-        profit_pool = backtest_result.get("profit_pool", {}) or summary.get("profit_pool", {})
-        free_shares = int(profit_pool.get("free_shares", 0))
-
-        # 1. 真实对齐做 T 纯利润 (优先取 grid_cash_profit 与 total_profit_accumulated)
-        raw_profit = (
-            summary.get("grid_cash_profit")
-            if summary.get("grid_cash_profit") is not None
-            else profit_pool.get("total_profit_accumulated", summary.get("total_profit", 0.0))
-        )
-        total_profit = round(float(raw_profit or 0.0), 2)
-
-        # 2. 真实年化收益率折算
-        strategy_ret = float(summary.get("strategy_return", summary.get("total_return", 0.0)))
-        if "annualized_return" in summary:
-            annual_return = float(summary["annualized_return"])
-        elif actual_cal_days > 0 and strategy_ret != 0.0:
-            annual_return = round(strategy_ret * (365.0 / actual_cal_days), 2)
-        else:
-            annual_return = round(strategy_ret, 2)
-
-        max_drawdown = round(float(summary.get("max_drawdown", 0.0)), 2)
-        total_trades = int(
-            summary.get("total_trades_count")
-            or summary.get("total_trades")
-            or len(backtest_result.get("total_trades_all", []))
-        )
-
-        summary_json = json.dumps(summary, ensure_ascii=False)
-        equity_curve_json = json.dumps(backtest_result.get("equity_curve", []), ensure_ascii=False)
-        trades_all = backtest_result.get("total_trades_all", backtest_result.get("recent_trades", []))
-        trades_json = json.dumps(trades_all, ensure_ascii=False)
-        params_json = json.dumps(params or {}, ensure_ascii=False)
-
-        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn = self._get_connection()
-        try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO backtest_runs (
-                    run_id, etf_code, etf_name, backtest_days, actual_days,
-                    total_capital, step_mode, reinvest_mode,
-                    annual_return, max_drawdown, total_profit, total_trades, free_shares,
-                    is_partial_history, partial_reason,
-                    params_json, summary_json, equity_curve_json, trades_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                run_id, etf_code, etf_name, backtest_days, actual_days,
-                total_capital, step_mode, reinvest_mode,
-                annual_return, max_drawdown, total_profit, total_trades, free_shares,
-                is_partial, partial_reason,
-                params_json, summary_json, equity_curve_json, trades_json, created_at
-            ))
             conn.commit()
         finally:
             conn.close()
 
-        logger.info(f"回测快照归档成功: run_id={run_id}, etf={etf_code}, trades={total_trades}")
-        return run_id
+    def _fixed_created_at(self, run_id: str, created_at: str) -> Optional[str]:
+        parts = run_id.split("_")
+        if len(parts) < 3 or len(parts[1]) != 8 or len(parts[2]) != 6:
+            return None
+        run_full = (
+            f"{parts[1][:4]}-{parts[1][4:6]}-{parts[1][6:]} "
+            f"{parts[2][:2]}:{parts[2][2:4]}:{parts[2][4:]}"
+        )
+        try:
+            dt_run = datetime.strptime(run_full, "%Y-%m-%d %H:%M:%S")
+            dt_created = datetime.strptime(created_at[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+        diff_hours = round((dt_run - dt_created).total_seconds() / 3600.0)
+        if 7 <= diff_hours <= 9:
+            return dt_run.strftime("%Y-%m-%d %H:%M:%S")
+        return None
 
     @staticmethod
     def step_bucket(step_mode: Optional[str]) -> str:
@@ -271,6 +75,119 @@ class BacktestRepository:
             return "自定义网格"
         return "未知"
 
+    def save_run(
+        self,
+        etf_code: str,
+        etf_name: str,
+        backtest_days: int,
+        total_capital: float,
+        step_mode: str,
+        reinvest_mode: str,
+        backtest_result: Dict[str, Any],
+        params: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
+        summary = backtest_result.get("summary", {})
+        meta = backtest_result.get("history_meta", {}) or summary.get("history_meta", {})
+        actual_days = meta.get("actual_trading_days", backtest_days)
+        is_partial = 1 if meta.get("is_partial_history") else 0
+        profit_pool = backtest_result.get("profit_pool", {}) or summary.get("profit_pool", {})
+        created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        bucket = self.step_bucket(step_mode)
+        summary_json = json.dumps(summary, ensure_ascii=False)
+        params_json = json.dumps(params or {}, ensure_ascii=False)
+        equity_json = json.dumps(backtest_result.get("equity_curve", []), ensure_ascii=False)
+        trades_all = backtest_result.get("total_trades_all", backtest_result.get("recent_trades", []))
+        trades_json = json.dumps(trades_all, ensure_ascii=False)
+
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE backtest_run SET is_latest = 0
+                    WHERE etf_code = %s AND backtest_days = %s AND step_bucket = %s
+                    """,
+                    (etf_code, backtest_days, bucket),
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO backtest_run (
+                        run_id, etf_code, etf_name, backtest_days, actual_days,
+                        total_capital, step_mode, step_bucket, reinvest_mode,
+                        annual_return, max_drawdown, total_profit, total_trades, free_shares,
+                        is_partial_history, partial_reason,
+                        params_json, summary_json, created_at, is_latest
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 1)
+                    """,
+                    (
+                        run_id, etf_code, etf_name, backtest_days, actual_days,
+                        total_capital, step_mode, bucket, reinvest_mode,
+                        self._annual_return(summary, meta, actual_days),
+                        round(float(summary.get("max_drawdown", 0.0) or 0.0), 2),
+                        self._total_profit(summary, profit_pool),
+                        self._total_trades(summary, backtest_result),
+                        int(profit_pool.get("free_shares", 0) or 0),
+                        is_partial,
+                        meta.get("partial_reason"),
+                        params_json,
+                        summary_json,
+                        created_at,
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self._insert_payload(run_id, equity_json, trades_json)
+        logger.info("回测快照归档成功: run_id=%s, etf=%s", run_id, etf_code)
+        return run_id
+
+    def _insert_payload(self, run_id: str, equity_json: str, trades_json: str) -> None:
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO backtest_run_payload (run_id, equity_curve_json, trades_json)
+                    VALUES (%s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        equity_curve_json = VALUES(equity_curve_json),
+                        trades_json = VALUES(trades_json)
+                    """,
+                    (run_id, equity_json, trades_json),
+                )
+            conn.commit()
+        except Exception as exc:
+            logger.error("写入回测曲线失败 (%s): %s", run_id, exc)
+            raise
+        finally:
+            conn.close()
+
+    def _total_profit(self, summary: Dict[str, Any], profit_pool: Dict[str, Any]) -> float:
+        raw_profit = (
+            summary.get("grid_cash_profit")
+            if summary.get("grid_cash_profit") is not None
+            else profit_pool.get("total_profit_accumulated", summary.get("total_profit", 0.0))
+        )
+        return round(float(raw_profit or 0.0), 2)
+
+    def _annual_return(self, summary: Dict[str, Any], meta: Dict[str, Any], actual_days: int) -> float:
+        strategy_ret = float(summary.get("strategy_return", summary.get("total_return", 0.0)) or 0.0)
+        calendar_days = meta.get("actual_calendar_days") or actual_days
+        if "annualized_return" in summary:
+            return float(summary["annualized_return"])
+        if calendar_days and strategy_ret != 0.0:
+            return round(strategy_ret * (365.0 / calendar_days), 2)
+        return round(strategy_ret, 2)
+
+    def _total_trades(self, summary: Dict[str, Any], result: Dict[str, Any]) -> int:
+        return int(
+            summary.get("total_trades_count")
+            or summary.get("total_trades")
+            or len(result.get("total_trades_all", []) or [])
+        )
+
     def list_runs(
         self,
         etf_code: Optional[str] = None,
@@ -282,81 +199,43 @@ class BacktestRepository:
         sector: Optional[str] = None,
         sector_map: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """获取回测档案轻量列表。赛道按传入映射实时解析，筛选发生在分页之前。"""
         conditions = []
         params: List[Any] = []
-
         if etf_code:
-            conditions.append("etf_code = ?")
+            conditions.append("etf_code = %s")
             params.append(str(etf_code).strip())
-
         if days is not None:
-            conditions.append("backtest_days = ?")
+            conditions.append("backtest_days = %s")
             params.append(int(days))
-
         if step_mode == "atr":
-            conditions.append("step_mode = ?")
+            conditions.append("step_mode = %s")
             params.append("atr")
         elif step_mode == "fixed_eda":
-            conditions.append("step_mode = ?")
+            conditions.append("step_mode = %s")
             params.append("fixed_eda")
         elif step_mode == "unknown":
             conditions.append("step_mode NOT IN ('atr', 'fixed_eda')")
-
-        step_window = "CASE WHEN step_mode IN ('atr', 'fixed_eda') THEN step_mode ELSE 'unknown' END"
-        list_cols = """
-            b.run_id, b.created_at, b.etf_code, b.etf_name, b.backtest_days, b.actual_days,
-            b.total_capital, b.step_mode, b.reinvest_mode,
-            b.annual_return, b.max_drawdown, b.total_profit, b.total_trades, b.free_shares,
-            b.is_partial_history, b.partial_reason, b.id
-        """
-        where_sql = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         if latest_only:
-            query = f"""
-                SELECT {list_cols}
-                FROM backtest_runs b
-                INNER JOIN (
-                    SELECT id FROM (
-                        SELECT id,
-                            ROW_NUMBER() OVER (
-                                PARTITION BY etf_code, backtest_days, {step_window}
-                                ORDER BY id DESC
-                            ) AS rn
-                        FROM backtest_runs
-                        {where_sql}
-                    ) ranked
-                    WHERE rn = 1
-                ) latest ON latest.id = b.id
-                ORDER BY b.backtest_days DESC, b.id DESC
-            """
-        else:
-            query = f"""
-                SELECT {list_cols}
-                FROM backtest_runs b
-                {where_sql}
-                ORDER BY b.backtest_days DESC, b.id DESC
-            """
-
-        sector_lookup = sector_map or {}
-        conn = self._get_connection()
+            conditions.append("is_latest = 1")
+        where_sql = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        query = f"""
+            SELECT run_id, created_at, etf_code, etf_name, backtest_days, actual_days,
+                   total_capital, step_mode, reinvest_mode,
+                   annual_return, max_drawdown, total_profit, total_trades, free_shares,
+                   is_partial_history, partial_reason, id
+            FROM backtest_run
+            {where_sql}
+            ORDER BY backtest_days DESC, id DESC
+        """
+        conn = self._connect()
         try:
-            cursor = conn.cursor()
-            cursor.execute(query, params)
-            rows = cursor.fetchall()
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
+                rows = cursor.fetchall()
         finally:
             conn.close()
 
-        records = []
-        for row in rows:
-            item = dict(row)
-            mapped_sector = sector_lookup.get(item["etf_code"])
-            item["sector"] = mapped_sector or "未入池"
-            item["step_label"] = self.step_label(item.get("step_mode"))
-            item["is_partial_history"] = bool(item["is_partial_history"])
-            if sector and item["sector"] != sector:
-                continue
-            records.append(item)
-
+        records = self._decorate_rows(rows, sector, sector_map or {})
         total = len(records)
         start = max(0, offset)
         end = start + max(1, min(200, limit))
@@ -366,8 +245,19 @@ class BacktestRepository:
             item.pop("id", None)
         return {"total": total, "records": page}
 
+    def _decorate_rows(self, rows, sector, sector_lookup) -> List[Dict[str, Any]]:
+        records = []
+        for row in rows:
+            item = dict(row)
+            item["sector"] = sector_lookup.get(item["etf_code"]) or "未入池"
+            item["step_label"] = self.step_label(item.get("step_mode"))
+            item["is_partial_history"] = bool(item["is_partial_history"])
+            if sector and item["sector"] != sector:
+                continue
+            records.append(item)
+        return records
+
     def _attach_page_params(self, page: List[Dict[str, Any]]) -> None:
-        """只给当前页补 params，避免列表把净值曲线和成交 JSON 整表读出来。"""
         if not page:
             return
         ids = [item["id"] for item in page if item.get("id") is not None]
@@ -375,78 +265,125 @@ class BacktestRepository:
             for item in page:
                 item["params"] = {}
             return
-        placeholders = ",".join("?" for _ in ids)
-        conn = self._get_connection()
+        placeholders = ",".join(["%s"] * len(ids))
+        conn = self._connect()
         try:
-            cursor = conn.cursor()
-            cursor.execute(
-                f"SELECT id, params_json FROM backtest_runs WHERE id IN ({placeholders})",
-                ids,
-            )
-            payloads = {row["id"]: row["params_json"] for row in cursor.fetchall()}
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT id, params_json FROM backtest_run WHERE id IN ({placeholders})",
+                    ids,
+                )
+                payloads = {row["id"]: row["params_json"] for row in cursor.fetchall()}
         finally:
             conn.close()
         for item in page:
-            raw = payloads.get(item.get("id"))
-            try:
-                item["params"] = json.loads(raw or "{}")
-            except Exception:
-                item["params"] = {}
+            item["params"] = self._load_json(payloads.get(item.get("id")), {})
 
     def get_run_detail(self, run_id: str) -> Optional[Dict[str, Any]]:
-        """获取单次回测全量详情，反序列化 json 字段实现即时无损还原"""
-        conn = self._get_connection()
+        conn = self._connect()
         try:
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM backtest_runs WHERE run_id = ?", (run_id,))
-            row = cursor.fetchone()
-            if not row:
-                return None
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT r.*, p.equity_curve_json, p.trades_json
+                    FROM backtest_run r
+                    LEFT JOIN backtest_run_payload p ON p.run_id = r.run_id
+                    WHERE r.run_id = %s
+                    """,
+                    (run_id,),
+                )
+                row = cursor.fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        data = dict(row)
+        data["is_partial_history"] = bool(data["is_partial_history"])
+        data["params"] = self._load_json(data.pop("params_json", None), {})
+        data["summary"] = self._load_json(data.pop("summary_json", None), {})
+        data["equity_curve"] = self._load_json(data.pop("equity_curve_json", None), [])
+        data["trades"] = self._load_json(data.pop("trades_json", None), [])
+        return data
 
-            data = dict(row)
-            data["is_partial_history"] = bool(data["is_partial_history"])
-            try:
-                data["params"] = json.loads(data.pop("params_json", None) or "{}")
-            except Exception:
-                data["params"] = {}
-            try:
-                data["summary"] = json.loads(data.pop("summary_json", None) or "{}")
-            except Exception:
-                data["summary"] = {}
-            try:
-                data["equity_curve"] = json.loads(data.pop("equity_curve_json", None) or "[]")
-            except Exception:
-                data["equity_curve"] = []
-            try:
-                data["trades"] = json.loads(data.pop("trades_json", None) or "[]")
-            except Exception:
-                data["trades"] = []
-
-            return data
+    def delete_run(self, run_id: str) -> bool:
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT etf_code, backtest_days, step_bucket, is_latest FROM backtest_run WHERE run_id = %s",
+                    (run_id,),
+                )
+                current = cursor.fetchone()
+                cursor.execute("DELETE FROM backtest_run_payload WHERE run_id = %s", (run_id,))
+                cursor.execute("DELETE FROM backtest_run WHERE run_id = %s", (run_id,))
+                deleted = cursor.rowcount > 0
+                if deleted and current and current["is_latest"]:
+                    self._promote_latest(cursor, current)
+            conn.commit()
+            return deleted
         finally:
             conn.close()
 
-    def delete_run(self, run_id: str) -> bool:
-        """删除指定回测记录"""
-        conn = self._get_connection()
+    def _promote_latest(self, cursor, current: Dict[str, Any]) -> None:
+        cursor.execute(
+            """
+            UPDATE backtest_run
+            SET is_latest = 1
+            WHERE etf_code = %s AND backtest_days = %s AND step_bucket = %s
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (current["etf_code"], current["backtest_days"], current["step_bucket"]),
+        )
+
+    def backfill_latest_flags(self) -> None:
+        conn = self._connect()
         try:
-            cursor = conn.cursor()
-            cursor.execute("DELETE FROM backtest_runs WHERE run_id = ?", (run_id,))
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE backtest_run SET is_latest = 0")
+                cursor.execute(
+                    """
+                    UPDATE backtest_run r
+                    INNER JOIN (
+                        SELECT MAX(id) AS id
+                        FROM backtest_run
+                        GROUP BY etf_code, backtest_days, step_bucket
+                    ) latest ON latest.id = r.id
+                    SET r.is_latest = 1
+                    """
+                )
             conn.commit()
-            return cursor.rowcount > 0
         finally:
             conn.close()
 
     def get_distinct_etfs(self) -> List[Dict[str, str]]:
-        """获取历史已测过的标的代码和名称列表，供前端筛选下拉框使用"""
-        conn = self._get_connection()
+        conn = self._connect()
         try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT DISTINCT etf_code, etf_name 
-                FROM backtest_runs 
-                ORDER BY created_at DESC
-            """)
-            return [dict(r) for r in cursor.fetchall()]
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT etf_code, etf_name
+                    FROM backtest_run
+                    GROUP BY etf_code, etf_name
+                    ORDER BY MAX(created_at) DESC
+                    """
+                )
+                return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
+
+    def count_runs(self) -> int:
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) AS count FROM backtest_run")
+                return int(cursor.fetchone()["count"])
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _load_json(raw: Optional[str], fallback):
+        try:
+            return json.loads(raw or ("[]" if isinstance(fallback, list) else "{}"))
+        except Exception:
+            return fallback

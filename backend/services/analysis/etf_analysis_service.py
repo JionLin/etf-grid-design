@@ -92,6 +92,7 @@ class ETFAnalysisService:
         sector: Optional[str] = None,
         is_t0: Optional[bool] = None,
         elasticity: Optional[str] = None,
+        subsector: Optional[str] = None,
         min_amount_10k: float = 0.0,
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5,
@@ -114,6 +115,7 @@ class ETFAnalysisService:
             sector=sector,
             is_t0=is_t0,
             elasticity=elasticity,
+            subsector=subsector,
             min_amount_10k=min_amount_10k,
             min_ma20_amount_10k=min_ma20_amount_10k,
             min_atr_pct=min_atr_pct,
@@ -128,6 +130,10 @@ class ETFAnalysisService:
             "t0_total": summary.get("t0_count", 0),
             "unclassified_count": summary.get("unclassified_count", 0),
             "sectors_summary": summary.get("sectors", []),
+            "subsectors_summary": self.akshare_client.pool_repo.list_subsector_summary(
+                min_ma20_amount_10k=min_ma20_amount_10k,
+                min_atr_pct=min_atr_pct,
+            ),
             "items": items
         }
 

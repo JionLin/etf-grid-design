@@ -1,12 +1,12 @@
 import inspect
-import os
-import tempfile
 import unittest
 
 from backend.api.routes.analysis_routes import refresh_grid_fit
 from backend.repositories.backtest_repository import BacktestRepository
 from backend.repositories.etf_pool_repository import ETFPoolRepository
 from backend.repositories.grid_fit_repository import GridFitRepository
+from backend.repositories.mysql_connection import TEST_DATABASE
+from backend.repositories.mysql_schema import reset_business_tables
 from backend.services.analysis.grid_fit_service import (
     PROTOCOL_VERSION,
     GridFitBoardService,
@@ -31,14 +31,10 @@ def _result(profit, calendar_days, sells, drawdown, annual_return):
 
 class TestGridFitBoard(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = os.path.join(self.temp_dir.name, "records.db")
-        self.repo = GridFitRepository(db_path=self.db_path)
-        self.archive = BacktestRepository(db_path=self.db_path)
+        reset_business_tables(TEST_DATABASE)
+        self.repo = GridFitRepository(database=TEST_DATABASE)
+        self.archive = BacktestRepository(database=TEST_DATABASE)
         self.service = GridFitBoardService(self.repo)
-
-    def tearDown(self):
-        self.temp_dir.cleanup()
 
     def test_negative_profit_stays_negative_and_thresholds_have_no_rank(self):
         self.assertEqual(annualized_grid_cash_yield(-1500, 1825), -0.01)
@@ -204,10 +200,7 @@ class TestGridFitBoard(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_universe_excludes_unclassified(self):
-        pool = ETFPoolRepository(
-            db_path=os.path.join(self.temp_dir.name, "pool.db"),
-            json_path=os.path.join(self.temp_dir.name, "pool.json"),
-        )
+        pool = ETFPoolRepository(database=TEST_DATABASE)
         pool.save_pool([
             {
                 "etf_code": "515220",

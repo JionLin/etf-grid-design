@@ -1,7 +1,7 @@
-import os
-import tempfile
 import pytest
 from backend.repositories.etf_pool_repository import ETFPoolRepository
+from backend.repositories.mysql_connection import TEST_DATABASE
+from backend.repositories.mysql_schema import reset_business_tables
 
 
 class TestETFPoolRepository:
@@ -9,11 +9,8 @@ class TestETFPoolRepository:
 
     @pytest.fixture
     def temp_repo(self):
-        with tempfile.NamedTemporaryFile(suffix=".db") as db_f, tempfile.NamedTemporaryFile(
-            suffix=".json"
-        ) as json_f:
-            repo = ETFPoolRepository(db_path=db_f.name, json_path=json_f.name)
-            yield repo
+        reset_business_tables(TEST_DATABASE)
+        yield ETFPoolRepository(database=TEST_DATABASE)
 
     def test_save_and_query_pool(self, temp_repo):
         sample_data = [

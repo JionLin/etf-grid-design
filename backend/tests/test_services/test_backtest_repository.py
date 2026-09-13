@@ -1,19 +1,15 @@
 import unittest
-import os
-import tempfile
 from backend.repositories.backtest_repository import BacktestRepository
+from backend.repositories.mysql_connection import TEST_DATABASE
+from backend.repositories.mysql_schema import reset_business_tables
 
 
 class TestBacktestRepository(unittest.TestCase):
-    """验证 SQLite 回测档案库的存储、列表筛选、详情还原与删除功能"""
+    """验证回测档案的存储、列表筛选、详情还原与删除功能"""
 
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = os.path.join(self.temp_dir.name, "test_backtest.db")
-        self.repo = BacktestRepository(db_path=self.db_path)
-
-    def tearDown(self):
-        self.temp_dir.cleanup()
+        reset_business_tables(TEST_DATABASE)
+        self.repo = BacktestRepository(database=TEST_DATABASE)
 
     def test_save_and_get_detail_and_list(self):
         mock_result = {
@@ -56,6 +52,8 @@ class TestBacktestRepository(unittest.TestCase):
         self.assertEqual(list_res['total'], 1)
         self.assertEqual(len(list_res['records']), 1)
         rec = list_res['records'][0]
+        self.assertNotIn('equity_curve', rec)
+        self.assertNotIn('trades', rec)
         self.assertEqual(rec['run_id'], run_id)
         self.assertEqual(rec['annual_return'], 24.5)
         self.assertEqual(rec['free_shares'], 500)
@@ -183,23 +181,25 @@ class TestBacktestRepository(unittest.TestCase):
         # 模拟一条因历史 SQLite 导致落后 8 小时的记录
         fake_run_id = "run_20260912_200000_123456"
         utc_created_at = "2026-09-12 12:00:00"  # 落后 8 小时
-        with self.repo._get_connection() as conn:
-            conn.cursor().execute("""
-                INSERT INTO backtest_runs (
-                    run_id, etf_code, etf_name, backtest_days, actual_days,
-                    total_capital, step_mode, reinvest_mode,
-                    annual_return, max_drawdown, total_profit, total_trades, free_shares,
-                    is_partial_history, partial_reason,
-                    params_json, summary_json, equity_curve_json, trades_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                fake_run_id, '510300', '沪深300', 180, 180,
-                50000.0, 'atr', 'cash',
-                8.0, 5.0, 800.0, 10, 0,
-                0, None,
-                '{}', '{}', '[]', '[]', utc_created_at
-            ))
+        conn = self.repo._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO backtest_run (
+                        run_id, etf_code, etf_name, backtest_days, actual_days,
+                        total_capital, step_mode, step_bucket, reinvest_mode,
+                        annual_return, max_drawdown, total_profit, total_trades, free_shares,
+                        is_partial_history, params_json, summary_json, created_at, is_latest
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    fake_run_id, '510300', '沪深300', 180, 180,
+                    50000.0, 'atr', 'atr', 'cash',
+                    8.0, 5.0, 800.0, 10, 0,
+                    0, '{}', '{}', utc_created_at, 0
+                ))
             conn.commit()
+        finally:
+            conn.close()
 
         # 触发时区自愈迁移
         self.repo.migrate_fix_timezone_offset()

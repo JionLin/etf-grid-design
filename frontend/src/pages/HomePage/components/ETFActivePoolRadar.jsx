@@ -3,9 +3,9 @@ import { Link } from "react-router-dom";
 import {
   CARD_RENDER_LIMIT,
   PRIMARY_SECTORS,
-  SUB_SECTORS_MAP,
   buildTruncationLabel,
-  matchesSubSector,
+  filterByStoredSubsector,
+  subsectorsForSector,
 } from "./radarDisplay";
 
 export default function ETFActivePoolRadar({ onSelectETF }) {
@@ -35,7 +35,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     const controller = new AbortController();
     fetchPoolData(controller.signal);
     return () => controller.abort();
-  }, [selectedSector, onlyT0, selectedElasticity]);
+  }, [selectedSector, selectedSubSector, onlyT0, selectedElasticity]);
 
   const fetchUnclassified = async (signal) => {
     try {
@@ -63,6 +63,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
       if (onlyT0) params.append("is_t0", "true");
       if (selectedElasticity !== "全部")
         params.append("elasticity", selectedElasticity);
+      if (selectedSubSector !== "全部") params.append("subsector", selectedSubSector);
       params.append("min_ma20_amount", "3000");
       params.append("min_atr", "1.5");
 
@@ -91,34 +92,19 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
 
   // 当前一级赛道下的二级细分列表配置
   const currentSubSectors = useMemo(() => {
-    if (selectedSector === "全部" || !SUB_SECTORS_MAP[selectedSector]) {
+    if (selectedSector === "全部") {
       return [];
     }
-    const defs = SUB_SECTORS_MAP[selectedSector];
-    const items = poolData.items || [];
-
-    // 动态计算每个二级分类的命中数量
-    const subs = defs.map((def) => {
-      const count = items.filter((it) => matchesSubSector(it.name, def.kws)).length;
-      return { ...def, count };
-    });
-
-    return [{ name: "全部", count: items.length, kws: [] }, ...subs];
-  }, [selectedSector, poolData.items]);
+    const subs = subsectorsForSector(poolData.subsectors_summary, selectedSector);
+    const sectorCount = sectorCountMap[selectedSector] ?? 0;
+    return [{ name: "全部", count: sectorCount }, ...subs];
+  }, [selectedSector, poolData.subsectors_summary, sectorCountMap]);
 
   // 客户端过滤：二级分类 + 搜索关键字
   const filteredItems = useMemo(() => {
     let result = poolData.items || [];
 
-    // 1. 二级细分分类过滤
-    if (selectedSubSector !== "全部" && SUB_SECTORS_MAP[selectedSector]) {
-      const targetDef = SUB_SECTORS_MAP[selectedSector].find(
-        (s) => s.name === selectedSubSector
-      );
-      if (targetDef && targetDef.kws.length > 0) {
-        result = result.filter((it) => matchesSubSector(it.name, targetDef.kws));
-      }
-    }
+    result = filterByStoredSubsector(result, selectedSubSector);
 
     // 2. 搜索关键字过滤
     if (searchKeyword.trim()) {
@@ -138,8 +124,13 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     selectedSector === "全部"
       ? poolData.total || 0
       : sectorCountMap[selectedSector] ?? filteredItems.length;
-  const usesClientFilter = selectedSubSector !== "全部" || Boolean(searchKeyword.trim());
-  const hitCount = usesClientFilter ? filteredItems.length : sectorHitCount;
+  const selectedSubCount = currentSubSectors.find((item) => item.name === selectedSubSector)?.count;
+  const usesClientFilter = Boolean(searchKeyword.trim());
+  const hitCount = usesClientFilter
+    ? filteredItems.length
+    : selectedSubSector !== "全部"
+      ? selectedSubCount ?? filteredItems.length
+      : sectorHitCount;
   const truncationLabel = buildTruncationLabel(hitCount, renderedItems.length);
 
   return (
@@ -153,7 +144,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
               全市场做 T 核心 ETF 选品雷达
             </h2>
             <span className="bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs px-2.5 py-1 rounded-full font-bold border border-emerald-200 dark:border-emerald-800">
-              本地 SQLite 毫秒直出
+              本机 MySQL 直出
             </span>
             <Link
               to="/grid-fit"

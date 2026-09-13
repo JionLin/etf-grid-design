@@ -1,18 +1,14 @@
 import unittest
-import os
-import tempfile
 import pandas as pd
 from backend.repositories.market_data_repository import MarketDataRepository
+from backend.repositories.mysql_connection import TEST_DATABASE
+from backend.repositories.mysql_schema import reset_business_tables
 
 
 class TestMarketDataRepository(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.db_path = os.path.join(self.temp_dir.name, "test_market_data.db")
-        self.repo = MarketDataRepository(db_path=self.db_path)
-
-    def tearDown(self):
-        self.temp_dir.cleanup()
+        reset_business_tables(TEST_DATABASE)
+        self.repo = MarketDataRepository(database=TEST_DATABASE)
 
     def test_save_and_query_bars(self):
         """测试日 K 线的保存与按区间切片查询"""

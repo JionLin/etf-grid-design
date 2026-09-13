@@ -62,11 +62,11 @@ class TestEtfSectorTaxonomy:
             assert classified["sector"] == "未归类"
             assert classified["sector"] != "其他主题"
 
-    def test_summary_total_equals_eleven_sectors_and_excludes_cash(self, tmp_path):
-        repo = ETFPoolRepository(
-            db_path=str(tmp_path / "pool.db"),
-            json_path=str(tmp_path / "pool.json"),
-        )
+    def test_summary_total_equals_eleven_sectors_and_excludes_cash(self):
+        from backend.repositories.mysql_connection import TEST_DATABASE
+        from backend.repositories.mysql_schema import reset_business_tables
+        reset_business_tables(TEST_DATABASE)
+        repo = ETFPoolRepository(database=TEST_DATABASE)
         repo.save_pool([
             _row("515220", "煤炭ETF国泰", "其他主题"),
             _row("159941", "纳指ETF广发", "其他主题"),

@@ -97,6 +97,7 @@ def get_etf_pool():
         is_t0_param = request.args.get('is_t0')
         is_t0 = True if is_t0_param in ('true', '1', 'True') else (False if is_t0_param in ('false', '0', 'False') else None)
         elasticity = request.args.get('elasticity')
+        subsector = request.args.get('subsector')
         min_amount = float(request.args.get('min_amount', 0.0))
         min_ma20_amount = float(request.args.get('min_ma20_amount', 3000.0))
         min_atr = float(request.args.get('min_atr', 1.5))
@@ -106,6 +107,7 @@ def get_etf_pool():
             sector=sector,
             is_t0=is_t0,
             elasticity=elasticity,
+            subsector=subsector,
             min_amount_10k=min_amount,
             min_ma20_amount_10k=min_ma20_amount,
             min_atr_pct=min_atr,

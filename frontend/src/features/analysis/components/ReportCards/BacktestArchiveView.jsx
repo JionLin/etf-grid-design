@@ -225,7 +225,7 @@ export default function BacktestArchiveView({ onApplyParams }) {
                 网格适合度榜
               </Link>
               <span className="text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-mono">
-                SQLite 零依赖存储
+                本机 MySQL
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-0.5">
@@ -454,7 +454,7 @@ export default function BacktestArchiveView({ onApplyParams }) {
                     {detailLoading && !currentDetail ? (
                       <div className="py-8 text-center text-xs text-gray-400">
                         <RefreshCw className="w-5 h-5 animate-spin mx-auto text-indigo-500 mb-1" />
-                        正在从本地 SQLite 数据库还原回测快照...
+                        正在从本机 MySQL 还原回测快照...
                       </div>
                     ) : (
                       <>

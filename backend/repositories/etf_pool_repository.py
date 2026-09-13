@@ -1,13 +1,13 @@
-import os
-import json
-import sqlite3
 import logging
-from typing import Dict, Any, List, Optional
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from .etf_taxonomy import assign_subsector, catalog_rows
+from .mysql_connection import DEFAULT_DATABASE, connect
+from .mysql_schema import ensure_database
 
 logger = logging.getLogger(__name__)
 
-# 首页可购一级赛道。未归类与历史「其他主题」不得计入「全部」。
 SHOPPABLE_SECTORS = (
     "科技芯片",
     "新能源制造",
@@ -23,385 +23,370 @@ SHOPPABLE_SECTORS = (
 )
 UNCLASSIFIED_SECTOR = "未归类"
 
-DEFAULT_DB_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "data", "market_cache.db")
-)
-DEFAULT_JSON_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "data", "etf_active_pool.json")
-)
+_UPSERT_INSTRUMENT = """
+INSERT INTO etf_instrument (
+    etf_code, name, sector, subsector_code, is_t0, list_date,
+    latest_price, pct_change, amount_10k, amount_ma20_10k, atr_pct,
+    elasticity, score, is_seed, updated_at
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name),
+    sector = VALUES(sector),
+    subsector_code = VALUES(subsector_code),
+    is_t0 = VALUES(is_t0),
+    list_date = VALUES(list_date),
+    latest_price = VALUES(latest_price),
+    pct_change = VALUES(pct_change),
+    amount_10k = VALUES(amount_10k),
+    amount_ma20_10k = VALUES(amount_ma20_10k),
+    atr_pct = VALUES(atr_pct),
+    elasticity = VALUES(elasticity),
+    score = VALUES(score),
+    updated_at = VALUES(updated_at)
+"""
 
 
 class ETFPoolRepository:
-    """
-    全市场做 T ETF 核心标的池本地持久化存储库
-    支持 SQLite 高效过滤查询与本地 JSON 镜像快照双持久化
-    """
+    """可购标的池。读写只走 MySQL，不再写 JSON 镜像。"""
 
-    def __init__(self, db_path: Optional[str] = None, json_path: Optional[str] = None):
-        self.db_path = db_path or DEFAULT_DB_PATH
-        self.json_path = json_path or DEFAULT_JSON_PATH
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        os.makedirs(os.path.dirname(self.json_path), exist_ok=True)
-        self._init_database()
+    def __init__(self, database: Optional[str] = None, json_path: Optional[str] = None):
+        self.database = database or DEFAULT_DATABASE
+        self.json_path = json_path
+        ensure_database(self.database)
+        self._seed_catalog()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=15)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _connect(self):
+        return connect(self.database)
 
-    def _init_database(self):
-        """初始化标的池表结构与 WAL 性能模式"""
+    def _seed_catalog(self) -> None:
+        rows = catalog_rows()
+        conn = self._connect()
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("PRAGMA journal_mode=WAL;")
-                cursor.execute("PRAGMA synchronous=NORMAL;")
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS etf_pool_metadata (
-                        etf_code TEXT PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        sector TEXT NOT NULL,
-                        is_t0 INTEGER DEFAULT 0,
-                        list_date TEXT,
-                        latest_price REAL DEFAULT 0.0,
-                        pct_change REAL DEFAULT 0.0,
-                        amount_10k REAL DEFAULT 0.0,
-                        amount_ma20_10k REAL DEFAULT 0.0,
-                        atr_pct REAL DEFAULT 0.0,
-                        elasticity TEXT DEFAULT '稳健型',
-                        score REAL DEFAULT 80.0,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-                # 平滑迁移：若已存在表则动态增加 amount_ma20_10k 列
-                try:
-                    cursor.execute("ALTER TABLE etf_pool_metadata ADD COLUMN amount_ma20_10k REAL DEFAULT 0.0;")
-                except Exception:
-                    pass
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_pool_sector 
-                    ON etf_pool_metadata(sector);
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_pool_amount 
-                    ON etf_pool_metadata(amount_10k DESC);
-                """)
-                cursor.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_pool_amount_ma20
-                    ON etf_pool_metadata(amount_ma20_10k DESC);
-                """)
-                conn.commit()
-        except Exception as e:
-            logger.error(f"初始化本地标的池数据库失败: {e}")
-            raise
+            with conn.cursor() as cursor:
+                for sector in SHOPPABLE_SECTORS:
+                    cursor.execute(
+                        """
+                        INSERT INTO etf_sector (sector_code, name) VALUES (%s, %s)
+                        ON DUPLICATE KEY UPDATE name = VALUES(name)
+                        """,
+                        (sector, sector),
+                    )
+                for row in rows:
+                    cursor.execute(
+                        """
+                        INSERT INTO etf_subsector (subsector_code, sector_code, name, sort_order)
+                        VALUES (%s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            sector_code = VALUES(sector_code),
+                            name = VALUES(name),
+                            sort_order = VALUES(sort_order)
+                        """,
+                        (row["subsector_code"], row["sector_code"], row["name"], row["sort_order"]),
+                    )
+            conn.commit()
+        finally:
+            conn.close()
 
     def save_pool(self, records: List[Dict[str, Any]]) -> int:
-        """
-        批量幂等保存标的池数据到 SQLite，并同步持久化本地 JSON 镜像
-        """
         if not records:
             return 0
-
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        saved_count = 0
-
+        tuples = [self._instrument_tuple(record, now_str) for record in records]
+        conn = self._connect()
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                sql = """
-                    INSERT INTO etf_pool_metadata (
-                        etf_code, name, sector, is_t0, list_date,
-                        latest_price, pct_change, amount_10k, amount_ma20_10k, atr_pct,
-                        elasticity, score, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(etf_code) DO UPDATE SET
-                        name=excluded.name,
-                        sector=excluded.sector,
-                        is_t0=excluded.is_t0,
-                        list_date=excluded.list_date,
-                        latest_price=excluded.latest_price,
-                        pct_change=excluded.pct_change,
-                        amount_10k=excluded.amount_10k,
-                        amount_ma20_10k=excluded.amount_ma20_10k,
-                        atr_pct=excluded.atr_pct,
-                        elasticity=excluded.elasticity,
-                        score=excluded.score,
-                        updated_at=excluded.updated_at;
-                """
-                tuples = [
-                    (
-                        r["etf_code"],
-                        r["name"],
-                        r["sector"],
-                        1 if r.get("is_t0") else 0,
-                        r.get("list_date", ""),
-                        float(r.get("latest_price", 0.0)),
-                        float(r.get("pct_change", 0.0)),
-                        float(r.get("amount_10k", 0.0)),
-                        float(r.get("amount_ma20_10k", r.get("amount_10k", 0.0))),
-                        float(r.get("atr_pct", 0.0)),
-                        r.get("elasticity", "稳健型"),
-                        float(r.get("score", 80.0)),
-                        now_str,
-                    )
-                    for r in records
-                ]
-                cursor.executemany(sql, tuples)
-                conn.commit()
-                saved_count = len(tuples)
-
-            # 同步写 JSON 镜像快照
-            try:
-                with open(self.json_path, "w", encoding="utf-8") as f:
-                    json.dump(
-                        {
-                            "updated_at": now_str,
-                            "total": len(records),
-                            "items": records,
-                        },
-                        f,
-                        ensure_ascii=False,
-                        indent=2,
-                    )
-            except Exception as json_err:
-                logger.warning(f"写入标的池本地 JSON 镜像失败: {json_err}")
-
-            return saved_count
-        except Exception as e:
-            logger.error(f"批量保存标的池数据失败: {e}")
+            with conn.cursor() as cursor:
+                cursor.executemany(_UPSERT_INSTRUMENT, tuples)
+            conn.commit()
+            return len(tuples)
+        except Exception as exc:
+            logger.error("批量保存标的池失败: %s", exc)
             raise
+        finally:
+            conn.close()
+
+    def _instrument_tuple(self, record: Dict[str, Any], now_str: str) -> tuple:
+        sector = record["sector"]
+        subsector = record.get("subsector")
+        if subsector is None and "subsector_code" not in record:
+            subsector = assign_subsector(record["name"], sector)
+        elif subsector is None:
+            subsector = record.get("subsector_code")
+        return (
+            record["etf_code"],
+            record["name"],
+            sector,
+            subsector,
+            1 if record.get("is_t0") else 0,
+            record.get("list_date", ""),
+            float(record.get("latest_price", 0.0) or 0.0),
+            float(record.get("pct_change", 0.0) or 0.0),
+            float(record.get("amount_10k", 0.0) or 0.0),
+            float(record.get("amount_ma20_10k", record.get("amount_10k", 0.0)) or 0.0),
+            float(record.get("atr_pct", 0.0) or 0.0),
+            record.get("elasticity", "稳健型"),
+            float(record.get("score", 80.0) or 0.0),
+            1 if record.get("is_seed") else 0,
+            now_str,
+        )
 
     def get_pool(
         self,
         sector: Optional[str] = None,
         is_t0: Optional[bool] = None,
         elasticity: Optional[str] = None,
+        subsector: Optional[str] = None,
         min_amount_10k: float = 0.0,
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5,
         limit: int = 200,
     ) -> List[Dict[str, Any]]:
-        """
-        三维正交多条件组合过滤查询（默认月均成交额 >= 3000 万元，ATR >= 1.5%）
-        """
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                query = "SELECT * FROM etf_pool_metadata WHERE amount_ma20_10k >= ? AND amount_10k >= ? AND atr_pct >= ?"
-                params: List[Any] = [min_ma20_amount_10k, min_amount_10k, min_atr_pct]
-
-                if sector and sector != "全部":
-                    query += " AND sector = ?"
-                    params.append(sector)
-                else:
-                    placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
-                    query += f" AND sector IN ({placeholders})"
-                    params.extend(SHOPPABLE_SECTORS)
-
-                if is_t0 is not None and is_t0 is True:
-                    query += " AND is_t0 = 1"
-
-                if elasticity and elasticity != "全部":
-                    query += " AND elasticity = ?"
-                    params.append(elasticity)
-
-                query += " ORDER BY amount_ma20_10k DESC LIMIT ?"
-                params.append(limit)
-
-                cursor.execute(query, params)
-                rows = cursor.fetchall()
-
-                return [
-                    {
-                        "etf_code": row["etf_code"],
-                        "name": row["name"],
-                        "sector": row["sector"],
-                        "is_t0": bool(row["is_t0"]),
-                        "list_date": row["list_date"],
-                        "latest_price": row["latest_price"],
-                        "pct_change": row["pct_change"],
-                        "amount_10k": row["amount_10k"],
-                        "amount_ma20_10k": row["amount_ma20_10k"] if "amount_ma20_10k" in row.keys() else row["amount_10k"],
-                        "atr_pct": row["atr_pct"],
-                        "elasticity": row["elasticity"],
-                        "score": row["score"],
-                        "updated_at": row["updated_at"],
-                    }
-                    for row in rows
-                ]
-        except Exception as e:
-            logger.error(f"查询标的池数据失败: {e}")
+            query, params = self._pool_query(
+                sector, is_t0, elasticity, subsector, min_amount_10k, min_ma20_amount_10k, min_atr_pct, limit
+            )
+            conn = self._connect()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(query, params)
+                    rows = cursor.fetchall()
+            finally:
+                conn.close()
+            return [self._to_item(row) for row in rows]
+        except Exception as exc:
+            logger.error("查询标的池失败: %s", exc)
             return []
+
+    def _pool_query(self, sector, is_t0, elasticity, subsector, min_amount_10k, min_ma20, min_atr, limit):
+        query = (
+            "SELECT * FROM etf_instrument "
+            "WHERE amount_ma20_10k >= %s AND amount_10k >= %s AND atr_pct >= %s"
+        )
+        params: List[Any] = [min_ma20, min_amount_10k, min_atr]
+        if sector and sector != "全部":
+            query += " AND sector = %s"
+            params.append(sector)
+        else:
+            placeholders = ",".join(["%s"] * len(SHOPPABLE_SECTORS))
+            query += f" AND sector IN ({placeholders})"
+            params.extend(SHOPPABLE_SECTORS)
+        if is_t0 is True:
+            query += " AND is_t0 = 1"
+        if elasticity and elasticity != "全部":
+            query += " AND elasticity = %s"
+            params.append(elasticity)
+        if subsector and subsector != "全部":
+            query += " AND subsector_code = %s"
+            params.append(subsector)
+        query += " ORDER BY amount_ma20_10k DESC LIMIT %s"
+        params.append(limit)
+        return query, params
+
+    def _to_item(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "etf_code": row["etf_code"],
+            "name": row["name"],
+            "sector": row["sector"],
+            "subsector": row.get("subsector_code"),
+            "is_t0": bool(row["is_t0"]),
+            "list_date": row["list_date"],
+            "latest_price": row["latest_price"],
+            "pct_change": row["pct_change"],
+            "amount_10k": row["amount_10k"],
+            "amount_ma20_10k": row["amount_ma20_10k"],
+            "atr_pct": row["atr_pct"],
+            "elasticity": row["elasticity"],
+            "score": row["score"],
+            "is_seed": bool(row.get("is_seed")),
+            "updated_at": row["updated_at"],
+        }
 
     def get_sectors_summary(
         self,
         min_ma20_amount_10k: float = 3000.0,
-        min_atr_pct: float = 1.5
+        min_atr_pct: float = 1.5,
     ) -> Dict[str, Any]:
-        """获取 11 个可购赛道统计。「全部」不含未归类与历史其他主题。"""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                shoppable_placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
-                shoppable_params: List[Any] = [
-                    min_ma20_amount_10k,
-                    min_atr_pct,
-                    *SHOPPABLE_SECTORS,
-                ]
-                cursor.execute(
-                    f"""
-                    SELECT sector, COUNT(*) as count, AVG(atr_pct) as avg_atr
-                    FROM etf_pool_metadata
-                    WHERE amount_ma20_10k >= ? AND atr_pct >= ?
-                      AND sector IN ({shoppable_placeholders})
-                    GROUP BY sector
-                    ORDER BY count DESC
-                """,
-                    shoppable_params,
-                )
-                sector_rows = cursor.fetchall()
+            placeholders = ",".join(["%s"] * len(SHOPPABLE_SECTORS))
+            params: List[Any] = [min_ma20_amount_10k, min_atr_pct, *SHOPPABLE_SECTORS]
+            conn = self._connect()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        SELECT sector, COUNT(*) AS count, AVG(atr_pct) AS avg_atr
+                        FROM etf_instrument
+                        WHERE amount_ma20_10k >= %s AND atr_pct >= %s
+                          AND sector IN ({placeholders})
+                        GROUP BY sector ORDER BY count DESC
+                        """,
+                        params,
+                    )
+                    sector_rows = cursor.fetchall()
+                    cursor.execute(
+                        f"""
+                        SELECT COUNT(*) AS count FROM etf_instrument
+                        WHERE amount_ma20_10k >= %s AND atr_pct >= %s AND is_t0 = 1
+                          AND sector IN ({placeholders})
+                        """,
+                        params,
+                    )
+                    t0_count = cursor.fetchone()["count"]
+                    cursor.execute(
+                        f"""
+                        SELECT COUNT(*) AS count FROM etf_instrument
+                        WHERE amount_ma20_10k >= %s AND atr_pct >= %s
+                          AND sector IN ({placeholders})
+                        """,
+                        params,
+                    )
+                    total_count = cursor.fetchone()["count"]
+                    cursor.execute(
+                        """
+                        SELECT COUNT(*) AS count FROM etf_instrument
+                        WHERE amount_ma20_10k >= %s AND atr_pct >= %s AND sector = %s
+                        """,
+                        (min_ma20_amount_10k, min_atr_pct, UNCLASSIFIED_SECTOR),
+                    )
+                    unclassified_count = cursor.fetchone()["count"]
+            finally:
+                conn.close()
+            return {
+                "total_count": total_count,
+                "t0_count": t0_count,
+                "unclassified_count": unclassified_count,
+                "sectors": [
+                    {"name": row["sector"], "count": row["count"], "avg_atr": round(row["avg_atr"] or 0.0, 2)}
+                    for row in sector_rows
+                ],
+            }
+        except Exception as exc:
+            logger.error("查询赛道统计失败: %s", exc)
+            return {"total_count": 0, "t0_count": 0, "unclassified_count": 0, "sectors": []}
 
-                cursor.execute(
-                    f"""
-                    SELECT COUNT(*) as count FROM etf_pool_metadata
-                    WHERE amount_ma20_10k >= ? AND atr_pct >= ? AND is_t0 = 1
-                      AND sector IN ({shoppable_placeholders})
-                """,
-                    shoppable_params,
-                )
-                t0_count = cursor.fetchone()["count"]
-
-                cursor.execute(
-                    f"""
-                    SELECT COUNT(*) as count FROM etf_pool_metadata
-                    WHERE amount_ma20_10k >= ? AND atr_pct >= ?
-                      AND sector IN ({shoppable_placeholders})
-                """,
-                    shoppable_params,
-                )
-                total_count = cursor.fetchone()["count"]
-
+    def list_subsector_summary(
+        self,
+        min_ma20_amount_10k: float = 3000.0,
+        min_atr_pct: float = 1.5,
+    ) -> List[Dict[str, Any]]:
+        """小类目录含计数为零的小类。"""
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT COUNT(*) as count FROM etf_pool_metadata
-                    WHERE amount_ma20_10k >= ? AND atr_pct >= ? AND sector = ?
-                """,
-                    (min_ma20_amount_10k, min_atr_pct, UNCLASSIFIED_SECTOR),
+                    SELECT s.sector_code AS sector, s.name AS name, COUNT(i.etf_code) AS count
+                    FROM etf_subsector s
+                    LEFT JOIN etf_instrument i
+                      ON i.subsector_code = s.subsector_code
+                     AND i.amount_ma20_10k >= %s
+                     AND i.atr_pct >= %s
+                    GROUP BY s.sector_code, s.name, s.sort_order
+                    ORDER BY s.sector_code, s.sort_order
+                    """,
+                    (min_ma20_amount_10k, min_atr_pct),
                 )
-                unclassified_count = cursor.fetchone()["count"]
-
-                return {
-                    "total_count": total_count,
-                    "t0_count": t0_count,
-                    "unclassified_count": unclassified_count,
-                    "sectors": [
-                        {
-                            "name": r["sector"],
-                            "count": r["count"],
-                            "avg_atr": round(r["avg_atr"] or 0.0, 2),
-                        }
-                        for r in sector_rows
-                    ],
-                }
-        except Exception as e:
-            logger.error(f"查询赛道统计失败: {e}")
-            return {"total_count": 0, "t0_count": 0, "unclassified_count": 0, "sectors": []}
+                return [
+                    {"sector": row["sector"], "name": row["name"], "count": int(row["count"])}
+                    for row in cursor.fetchall()
+                ]
+        finally:
+            conn.close()
 
     def list_shoppable_universe(
         self,
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5,
     ) -> List[Dict[str, str]]:
-        """核心池 11 个可购赛道并集。不受雷达 200 条上限约束，不含未归类。"""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
-                cursor.execute(
-                    f"""
-                    SELECT etf_code, name, sector FROM etf_pool_metadata
-                    WHERE amount_ma20_10k >= ? AND atr_pct >= ?
-                      AND sector IN ({placeholders})
-                    ORDER BY sector, etf_code
-                """,
-                    (min_ma20_amount_10k, min_atr_pct, *SHOPPABLE_SECTORS),
-                )
-                return [
-                    {
-                        "etf_code": row["etf_code"],
-                        "etf_name": row["name"],
-                        "sector": row["sector"],
-                    }
-                    for row in cursor.fetchall()
-                ]
-        except Exception as e:
-            logger.error(f"读取适合度榜宇宙失败: {e}")
+            placeholders = ",".join(["%s"] * len(SHOPPABLE_SECTORS))
+            conn = self._connect()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        SELECT etf_code, name, sector FROM etf_instrument
+                        WHERE amount_ma20_10k >= %s AND atr_pct >= %s
+                          AND sector IN ({placeholders})
+                        ORDER BY sector, etf_code
+                        """,
+                        (min_ma20_amount_10k, min_atr_pct, *SHOPPABLE_SECTORS),
+                    )
+                    return [
+                        {"etf_code": row["etf_code"], "etf_name": row["name"], "sector": row["sector"]}
+                        for row in cursor.fetchall()
+                    ]
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.error("读取适合度宇宙失败: %s", exc)
             return []
 
     def find_name(self, etf_code: str) -> Optional[str]:
-        """按代码取池内名称。不打行情接口。"""
         clean_code = str(etf_code or "").split(".")[0].strip()
         if not clean_code:
             return None
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT name FROM etf_pool_metadata WHERE etf_code = ?",
-                    (clean_code,),
-                )
-                row = cursor.fetchone()
-                if row and row["name"]:
-                    return str(row["name"])
-        except Exception as e:
-            logger.warning(f"读取标的名称失败 ({clean_code}): {e}")
+            conn = self._connect()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT name FROM etf_instrument WHERE etf_code = %s",
+                        (clean_code,),
+                    )
+                    row = cursor.fetchone()
+            finally:
+                conn.close()
+            if row and row["name"]:
+                return str(row["name"])
+        except Exception as exc:
+            logger.warning("读取标的名称失败 (%s): %s", clean_code, exc)
         return None
 
     def list_sector_map(self) -> Dict[str, str]:
-        """返回可购赛道代码映射。未归类与其他主题不在映射中，调用方记为未入池。"""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
-                cursor.execute(
-                    f"""
-                    SELECT etf_code, sector FROM etf_pool_metadata
-                    WHERE sector IN ({placeholders})
-                """,
-                    SHOPPABLE_SECTORS,
-                )
-                return {row["etf_code"]: row["sector"] for row in cursor.fetchall()}
-        except Exception as e:
-            logger.error(f"读取赛道映射失败: {e}")
+            placeholders = ",".join(["%s"] * len(SHOPPABLE_SECTORS))
+            conn = self._connect()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        f"SELECT etf_code, sector FROM etf_instrument WHERE sector IN ({placeholders})",
+                        SHOPPABLE_SECTORS,
+                    )
+                    return {row["etf_code"]: row["sector"] for row in cursor.fetchall()}
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.error("读取赛道映射失败: %s", exc)
             return {}
 
     def reclassify_persisted(self, classify_fn) -> Dict[str, int]:
-        """按当前名称规则重刷已落盘赛道，剔除货币类，并重写 JSON 镜像。"""
         updated = 0
         removed = 0
+        conn = self._connect()
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT * FROM etf_pool_metadata")
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM etf_instrument")
                 rows = cursor.fetchall()
                 for row in rows:
                     classified = classify_fn(row["name"], row["etf_code"])
                     if classified.get("excluded"):
                         cursor.execute(
-                            "DELETE FROM etf_pool_metadata WHERE etf_code = ?",
+                            "DELETE FROM etf_instrument WHERE etf_code = %s",
                             (row["etf_code"],),
                         )
                         removed += 1
                         continue
+                    sector = classified["sector"]
                     cursor.execute(
                         """
-                        UPDATE etf_pool_metadata
-                        SET sector = ?, is_t0 = ?, atr_pct = ?, elasticity = ?,
-                            updated_at = ?
-                        WHERE etf_code = ?
-                    """,
+                        UPDATE etf_instrument
+                        SET sector = %s, subsector_code = %s, is_t0 = %s,
+                            atr_pct = %s, elasticity = %s, updated_at = %s
+                        WHERE etf_code = %s
+                        """,
                         (
-                            classified["sector"],
+                            sector,
+                            assign_subsector(row["name"], sector),
                             1 if classified.get("is_t0") else 0,
                             float(classified.get("atr_pct") or 0.0),
                             classified.get("elasticity") or "稳健型",
@@ -410,38 +395,94 @@ class ETFPoolRepository:
                         ),
                     )
                     updated += 1
-                conn.commit()
-                cursor.execute("SELECT * FROM etf_pool_metadata")
-                remaining = [dict(item) for item in cursor.fetchall()]
-            self._write_json_snapshot(remaining)
+            conn.commit()
             return {"updated": updated, "removed": removed}
-        except Exception as e:
-            logger.error(f"重刷标的池分类失败: {e}")
+        except Exception as exc:
+            logger.error("重刷标的池分类失败: %s", exc)
             raise
+        finally:
+            conn.close()
 
-    def _write_json_snapshot(self, records: List[Dict[str, Any]]) -> None:
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    def mark_seed_representatives(self) -> List[Dict[str, Any]]:
+        """每个有成员的小类只标记流动性最高的一只。"""
+        conn = self._connect()
         try:
-            with open(self.json_path, "w", encoding="utf-8") as handle:
-                json.dump(
-                    {
-                        "updated_at": now_str,
-                        "total": len(records),
-                        "items": records,
-                    },
-                    handle,
-                    ensure_ascii=False,
-                    indent=2,
+            with conn.cursor() as cursor:
+                cursor.execute("UPDATE etf_instrument SET is_seed = 0")
+                cursor.execute(
+                    """
+                    SELECT i.etf_code, i.name, i.sector, i.subsector_code, i.amount_ma20_10k
+                    FROM etf_instrument i
+                    INNER JOIN (
+                        SELECT subsector_code, MAX(amount_ma20_10k) AS max_amount
+                        FROM etf_instrument
+                        WHERE subsector_code IS NOT NULL AND subsector_code <> ''
+                        GROUP BY subsector_code
+                    ) picked
+                      ON picked.subsector_code = i.subsector_code
+                     AND picked.max_amount = i.amount_ma20_10k
+                    """
                 )
-        except Exception as json_err:
-            logger.warning(f"写入标的池本地 JSON 镜像失败: {json_err}")
+                winners = self._one_winner_per_subsector(cursor.fetchall())
+                for row in winners:
+                    cursor.execute(
+                        "UPDATE etf_instrument SET is_seed = 1 WHERE etf_code = %s",
+                        (row["etf_code"],),
+                    )
+            conn.commit()
+            return winners
+        finally:
+            conn.close()
+
+    def _one_winner_per_subsector(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        chosen: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            code = row["subsector_code"]
+            current = chosen.get(code)
+            if current is None or row["etf_code"] < current["etf_code"]:
+                chosen[code] = row
+        return [
+            {
+                "etf_code": row["etf_code"],
+                "etf_name": row["name"],
+                "sector": row["sector"],
+                "subsector": row["subsector_code"],
+            }
+            for row in chosen.values()
+        ]
+
+    def list_seeds(self) -> List[Dict[str, Any]]:
+        conn = self._connect()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT etf_code, name, sector, subsector_code
+                    FROM etf_instrument
+                    WHERE is_seed = 1 AND subsector_code IS NOT NULL
+                    ORDER BY sector, subsector_code
+                    """
+                )
+                return [
+                    {
+                        "etf_code": row["etf_code"],
+                        "etf_name": row["name"],
+                        "sector": row["sector"],
+                        "subsector": row["subsector_code"],
+                    }
+                    for row in cursor.fetchall()
+                ]
+        finally:
+            conn.close()
 
     def get_count(self) -> int:
-        """获取标的池总条数"""
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) as count FROM etf_pool_metadata")
-                return cursor.fetchone()["count"]
+            conn = self._connect()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) AS count FROM etf_instrument")
+                    return int(cursor.fetchone()["count"])
+            finally:
+                conn.close()
         except Exception:
             return 0

@@ -440,7 +440,15 @@ def get_grid_fit_progress():
 def refresh_grid_fit():
     """按锁定协议补行情并写榜。不调用个人档案自动归档。"""
     try:
-        universe = pool_repo.list_shoppable_universe()
+        pool_repo.mark_seed_representatives()
+        universe = [
+            {
+                "etf_code": item["etf_code"],
+                "etf_name": item["etf_name"],
+                "sector": item["sector"],
+            }
+            for item in pool_repo.list_seeds()
+        ]
         sync_fn, backtest_fn = build_protocol_callbacks(
             etf_service,
             etf_service.akshare_client,
