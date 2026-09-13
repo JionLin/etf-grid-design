@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { Link } from "react-router-dom";
 import {
   Database,
   RefreshCw,
@@ -20,6 +21,12 @@ import {
   deleteBacktestRecord,
   getBacktestDistinctETFs,
 } from "@shared/services/api";
+import {
+  ARCHIVE_SECTORS,
+  ARCHIVE_STEP_FILTERS,
+  archiveStepLabel,
+  buildArchiveListParams,
+} from "./archiveFilters";
 
 export default function BacktestArchiveView({ onApplyParams }) {
   const [loading, setLoading] = useState(false);
@@ -28,6 +35,8 @@ export default function BacktestArchiveView({ onApplyParams }) {
   const [distinctEtfs, setDistinctEtfs] = useState([]);
   const [selectedEtf, setSelectedEtf] = useState("");
   const [selectedDays, setSelectedDays] = useState("");
+  const [selectedSector, setSelectedSector] = useState("全部");
+  const [selectedStepMode, setSelectedStepMode] = useState("");
   const [latestOnly, setLatestOnly] = useState(true);
   const [appliedNotice, setAppliedNotice] = useState(null);
 
@@ -55,10 +64,13 @@ export default function BacktestArchiveView({ onApplyParams }) {
     setLoading(true);
     setError(null);
     try {
-      const params = {};
-      if (selectedEtf) params.etfCode = selectedEtf;
-      if (selectedDays) params.days = selectedDays;
-      params.latestOnly = latestOnly ? "true" : "false";
+      const params = buildArchiveListParams({
+        etfCode: selectedEtf,
+        days: selectedDays,
+        latestOnly,
+        sector: selectedSector,
+        stepMode: selectedStepMode,
+      });
 
       const [res, etfRes] = await Promise.all([
         getBacktestRecords(params),
@@ -86,7 +98,7 @@ export default function BacktestArchiveView({ onApplyParams }) {
 
   useEffect(() => {
     loadRecords();
-  }, [selectedEtf, selectedDays, latestOnly]);
+  }, [selectedEtf, selectedDays, latestOnly, selectedSector, selectedStepMode]);
 
   // 切换展开/收起详情
   const toggleDetail = async (runId) => {
@@ -194,6 +206,12 @@ export default function BacktestArchiveView({ onApplyParams }) {
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-bold text-gray-900">本地策略回测档案库</h3>
+              <Link
+                to="/grid-fit"
+                className="text-xs font-semibold text-indigo-700 underline"
+              >
+                网格适合度榜
+              </Link>
               <span className="text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-mono">
                 SQLite 零依赖存储
               </span>
@@ -259,6 +277,39 @@ export default function BacktestArchiveView({ onApplyParams }) {
         </div>
       </div>
 
+      <div className="flex flex-wrap gap-2">
+        {ARCHIVE_SECTORS.map((name) => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => setSelectedSector(name)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              selectedSector === name
+                ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                : "border-gray-200 bg-white text-gray-600"
+            }`}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {ARCHIVE_STEP_FILTERS.map((item) => (
+          <button
+            key={item.id || "all-steps"}
+            type="button"
+            onClick={() => setSelectedStepMode(item.id)}
+            className={`rounded-full border px-3 py-1 text-xs font-medium ${
+              selectedStepMode === item.id
+                ? "border-indigo-500 bg-indigo-50 text-indigo-700"
+                : "border-gray-200 bg-white text-gray-600"
+            }`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
       {/* 回填成功提示 */}
       {appliedNotice && (
         <div className="p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs border border-emerald-200 flex items-center gap-2">
@@ -310,8 +361,11 @@ export default function BacktestArchiveView({ onApplyParams }) {
                         <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-medium">
                           {rec.backtest_days} 天 ({rec.actual_days} 交易日)
                         </span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-50 text-slate-700 border border-slate-200 font-medium">
+                          {rec.sector || "未入池"}
+                        </span>
                         <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-mono">
-                          {rec.step_mode === "fixed_eda" ? "🏛️ E大原版" : "🌊 ATR 自适应"}
+                          {archiveStepLabel(rec)}
                         </span>
                         {rec.reinvest_mode === "pool_shares" && (
                           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 font-medium">

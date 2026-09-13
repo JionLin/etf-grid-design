@@ -7,6 +7,22 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# 首页可购一级赛道。未归类与历史「其他主题」不得计入「全部」。
+SHOPPABLE_SECTORS = (
+    "科技芯片",
+    "新能源制造",
+    "医药健康",
+    "大金融",
+    "大消费",
+    "周期资源",
+    "公用红利",
+    "国防军工",
+    "跨境全球",
+    "大宗商品",
+    "核心宽基",
+)
+UNCLASSIFIED_SECTOR = "未归类"
+
 DEFAULT_DB_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "data", "market_cache.db")
 )
@@ -177,6 +193,10 @@ class ETFPoolRepository:
                 if sector and sector != "全部":
                     query += " AND sector = ?"
                     params.append(sector)
+                else:
+                    placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
+                    query += f" AND sector IN ({placeholders})"
+                    params.extend(SHOPPABLE_SECTORS)
 
                 if is_t0 is not None and is_t0 is True:
                     query += " AND is_t0 = 1"
@@ -218,43 +238,62 @@ class ETFPoolRepository:
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5
     ) -> Dict[str, Any]:
-        """获取各 8 大赛道及 T+0 标的统计分布（默认月均成交额 >= 3000 万元，ATR >= 1.5%）"""
+        """获取 11 个可购赛道统计。「全部」不含未归类与历史其他主题。"""
         try:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                shoppable_placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
+                shoppable_params: List[Any] = [
+                    min_ma20_amount_10k,
+                    min_atr_pct,
+                    *SHOPPABLE_SECTORS,
+                ]
                 cursor.execute(
-                    """
+                    f"""
                     SELECT sector, COUNT(*) as count, AVG(atr_pct) as avg_atr
                     FROM etf_pool_metadata
                     WHERE amount_ma20_10k >= ? AND atr_pct >= ?
+                      AND sector IN ({shoppable_placeholders})
                     GROUP BY sector
                     ORDER BY count DESC
                 """,
-                    (min_ma20_amount_10k, min_atr_pct),
+                    shoppable_params,
                 )
                 sector_rows = cursor.fetchall()
 
                 cursor.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) as count FROM etf_pool_metadata
                     WHERE amount_ma20_10k >= ? AND atr_pct >= ? AND is_t0 = 1
+                      AND sector IN ({shoppable_placeholders})
                 """,
-                    (min_ma20_amount_10k, min_atr_pct),
+                    shoppable_params,
                 )
                 t0_count = cursor.fetchone()["count"]
 
                 cursor.execute(
-                    """
+                    f"""
                     SELECT COUNT(*) as count FROM etf_pool_metadata
                     WHERE amount_ma20_10k >= ? AND atr_pct >= ?
+                      AND sector IN ({shoppable_placeholders})
                 """,
-                    (min_ma20_amount_10k, min_atr_pct),
+                    shoppable_params,
                 )
                 total_count = cursor.fetchone()["count"]
+
+                cursor.execute(
+                    """
+                    SELECT COUNT(*) as count FROM etf_pool_metadata
+                    WHERE amount_ma20_10k >= ? AND atr_pct >= ? AND sector = ?
+                """,
+                    (min_ma20_amount_10k, min_atr_pct, UNCLASSIFIED_SECTOR),
+                )
+                unclassified_count = cursor.fetchone()["count"]
 
                 return {
                     "total_count": total_count,
                     "t0_count": t0_count,
+                    "unclassified_count": unclassified_count,
                     "sectors": [
                         {
                             "name": r["sector"],
@@ -266,7 +305,148 @@ class ETFPoolRepository:
                 }
         except Exception as e:
             logger.error(f"查询赛道统计失败: {e}")
-            return {"total_count": 0, "t0_count": 0, "sectors": []}
+            return {"total_count": 0, "t0_count": 0, "unclassified_count": 0, "sectors": []}
+
+    def list_shoppable_universe(
+        self,
+        min_ma20_amount_10k: float = 3000.0,
+        min_atr_pct: float = 1.5,
+    ) -> List[Dict[str, str]]:
+        """11 个可购赛道并集。不受雷达 200 条上限约束，不含未归类。"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
+                cursor.execute(
+                    f"""
+                    SELECT etf_code, name, sector FROM etf_pool_metadata
+                    WHERE amount_ma20_10k >= ? AND atr_pct >= ?
+                      AND sector IN ({placeholders})
+                    ORDER BY sector, etf_code
+                """,
+                    (min_ma20_amount_10k, min_atr_pct, *SHOPPABLE_SECTORS),
+                )
+                return [
+                    {
+                        "etf_code": row["etf_code"],
+                        "etf_name": row["name"],
+                        "sector": row["sector"],
+                    }
+                    for row in cursor.fetchall()
+                ]
+        except Exception as e:
+            logger.error(f"读取适合度榜宇宙失败: {e}")
+            return []
+
+    def list_shoppable_universe(
+        self,
+        min_ma20_amount_10k: float = 3000.0,
+        min_atr_pct: float = 1.5,
+    ) -> List[Dict[str, str]]:
+        """核心池 11 个可购赛道并集。不受雷达 200 条上限约束，不含未归类。"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
+                cursor.execute(
+                    f"""
+                    SELECT etf_code, name, sector FROM etf_pool_metadata
+                    WHERE amount_ma20_10k >= ? AND atr_pct >= ?
+                      AND sector IN ({placeholders})
+                    ORDER BY sector, etf_code
+                """,
+                    (min_ma20_amount_10k, min_atr_pct, *SHOPPABLE_SECTORS),
+                )
+                return [
+                    {
+                        "etf_code": row["etf_code"],
+                        "etf_name": row["name"],
+                        "sector": row["sector"],
+                    }
+                    for row in cursor.fetchall()
+                ]
+        except Exception as e:
+            logger.error(f"读取适合度榜宇宙失败: {e}")
+            return []
+
+    def list_sector_map(self) -> Dict[str, str]:
+        """返回可购赛道代码映射。未归类与其他主题不在映射中，调用方记为未入池。"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholders = ",".join("?" for _ in SHOPPABLE_SECTORS)
+                cursor.execute(
+                    f"""
+                    SELECT etf_code, sector FROM etf_pool_metadata
+                    WHERE sector IN ({placeholders})
+                """,
+                    SHOPPABLE_SECTORS,
+                )
+                return {row["etf_code"]: row["sector"] for row in cursor.fetchall()}
+        except Exception as e:
+            logger.error(f"读取赛道映射失败: {e}")
+            return {}
+
+    def reclassify_persisted(self, classify_fn) -> Dict[str, int]:
+        """按当前名称规则重刷已落盘赛道，剔除货币类，并重写 JSON 镜像。"""
+        updated = 0
+        removed = 0
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM etf_pool_metadata")
+                rows = cursor.fetchall()
+                for row in rows:
+                    classified = classify_fn(row["name"], row["etf_code"])
+                    if classified.get("excluded"):
+                        cursor.execute(
+                            "DELETE FROM etf_pool_metadata WHERE etf_code = ?",
+                            (row["etf_code"],),
+                        )
+                        removed += 1
+                        continue
+                    cursor.execute(
+                        """
+                        UPDATE etf_pool_metadata
+                        SET sector = ?, is_t0 = ?, atr_pct = ?, elasticity = ?,
+                            updated_at = ?
+                        WHERE etf_code = ?
+                    """,
+                        (
+                            classified["sector"],
+                            1 if classified.get("is_t0") else 0,
+                            float(classified.get("atr_pct") or 0.0),
+                            classified.get("elasticity") or "稳健型",
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            row["etf_code"],
+                        ),
+                    )
+                    updated += 1
+                conn.commit()
+                cursor.execute("SELECT * FROM etf_pool_metadata")
+                remaining = [dict(item) for item in cursor.fetchall()]
+            self._write_json_snapshot(remaining)
+            return {"updated": updated, "removed": removed}
+        except Exception as e:
+            logger.error(f"重刷标的池分类失败: {e}")
+            raise
+
+    def _write_json_snapshot(self, records: List[Dict[str, Any]]) -> None:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            with open(self.json_path, "w", encoding="utf-8") as handle:
+                json.dump(
+                    {
+                        "updated_at": now_str,
+                        "total": len(records),
+                        "items": records,
+                    },
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+        except Exception as json_err:
+            logger.warning(f"写入标的池本地 JSON 镜像失败: {json_err}")
 
     def get_count(self) -> int:
         """获取标的池总条数"""

@@ -1,87 +1,12 @@
 import React, { useState, useEffect, useMemo } from "react";
-
-// 二级产业链细分定义映射树
-const SUB_SECTORS_MAP = {
-  科技芯片: [
-    { name: "半导体芯片", kws: ["半导体", "芯片"] },
-    { name: "人工智能/AI", kws: ["人工智能", "AI", "算力", "机器人"] },
-    { name: "软件信创", kws: ["软件", "计算机", "信创", "大数据", "云计算"] },
-    { name: "电子通信", kws: ["电子", "通信", "5G", "消费电子"] },
-    { name: "传媒游戏", kws: ["传媒", "游戏", "影视", "动漫"] },
-  ],
-  周期资源: [
-    { name: "有色金属", kws: ["有色", "金属", "铜", "铝", "金"] },
-    { name: "煤炭资源", kws: ["煤炭"] },
-    { name: "化工材料", kws: ["化工", "橡胶"] },
-    { name: "钢铁资源", kws: ["钢铁"] },
-    { name: "油气石化", kws: ["油", "气", "能源", "石化"] },
-    { name: "稀土稀有", kws: ["稀土", "稀有"] },
-  ],
-  大金融: [
-    { name: "证券券商", kws: ["证券", "券商"] },
-    { name: "银行", kws: ["银行"] },
-    { name: "保险/金融科技/地产", kws: ["保险", "金融科技", "金融", "地产"] },
-  ],
-  新能源制造: [
-    { name: "光伏设备", kws: ["光伏"] },
-    { name: "电池储能", kws: ["电池", "锂电", "储能", "风电"] },
-    { name: "新能车", kws: ["汽车", "智能网联", "新能"] },
-    { name: "高端装备", kws: ["机械", "装备", "工业母机", "高端制造"] },
-  ],
-  医药健康: [
-    { name: "创新药", kws: ["创新药", "药"] },
-    { name: "医疗器械", kws: ["医疗", "器械"] },
-    { name: "中药", kws: ["中药"] },
-    { name: "生物疫苗", kws: ["生物", "疫苗"] },
-  ],
-  大消费: [
-    { name: "白酒酒类", kws: ["白酒", "酒"] },
-    { name: "食品饮料", kws: ["食品", "饮料"] },
-    { name: "家用电器", kws: ["家电", "电器"] },
-    { name: "农业养殖旅游", kws: ["农业", "养殖", "畜牧", "旅游"] },
-  ],
-  公用红利: [
-    { name: "红利低波", kws: ["红利", "低波", "高股息"] },
-    { name: "绿色电力", kws: ["电力", "绿电"] },
-    { name: "公用基建", kws: ["公用", "基建", "水务", "核电"] },
-  ],
-  国防军工: [
-    { name: "军工龙头", kws: ["军工"] },
-    { name: "航空航天", kws: ["航空", "航天", "国防"] },
-  ],
-  跨境全球: [
-    { name: "港股科技", kws: ["恒生科技", "港股通科技", "互联网", "中概"] },
-    { name: "港股医药/红利", kws: ["恒生医疗", "港股通红利", "港股通医药"] },
-    { name: "美股纳指标普", kws: ["纳斯达克", "纳指", "标普"] },
-    { name: "日韩亚太", kws: ["日经", "韩国", "亚太", "中韩"] },
-    { name: "欧洲成熟", kws: ["德国", "法国", "欧洲"] },
-  ],
-  大宗商品: [
-    { name: "黄金贵金属", kws: ["黄金", "白银"] },
-    { name: "农产品豆粕", kws: ["豆粕"] },
-    { name: "能源化工期货", kws: ["能源化工", "有色期货"] },
-  ],
-  核心宽基: [
-    { name: "超大盘(300/50)", kws: ["300", "50", "A50"] },
-    { name: "中小盘(500/1000/2000)", kws: ["500", "1000", "2000"] },
-    { name: "双创成长", kws: ["创业板", "科创50", "科创100"] },
-  ],
-};
-
-const ALL_PRIMARY_SECTORS = [
-  "全部",
-  "科技芯片",
-  "新能源制造",
-  "医药健康",
-  "大金融",
-  "大消费",
-  "周期资源",
-  "公用红利",
-  "国防军工",
-  "跨境全球",
-  "大宗商品",
-  "核心宽基",
-];
+import { Link } from "react-router-dom";
+import {
+  CARD_RENDER_LIMIT,
+  PRIMARY_SECTORS,
+  SUB_SECTORS_MAP,
+  buildTruncationLabel,
+  matchesSubSector,
+} from "./radarDisplay";
 
 export default function ETFActivePoolRadar({ onSelectETF }) {
   const [loading, setLoading] = useState(true);
@@ -96,6 +21,8 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
   const [onlyT0, setOnlyT0] = useState(false);
   const [selectedElasticity, setSelectedElasticity] = useState("全部");
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [showUnclassified, setShowUnclassified] = useState(false);
+  const [unclassifiedItems, setUnclassifiedItems] = useState([]);
 
   // 当一级分类变更时，重置二级分类为“全部”
   const handlePrimarySectorChange = (sector) => {
@@ -107,6 +34,22 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
   useEffect(() => {
     fetchPoolData();
   }, [selectedSector, onlyT0, selectedElasticity]);
+
+  const fetchUnclassified = async () => {
+    try {
+      const params = new URLSearchParams();
+      params.append("sector", "未归类");
+      params.append("min_ma20_amount", "3000");
+      params.append("min_atr", "1.5");
+      const res = await fetch(`/api/etf/pool?${params.toString()}`);
+      const json = await res.json();
+      if (json.success && json.data) {
+        setUnclassifiedItems(json.data.items || []);
+      }
+    } catch (e) {
+      console.error("加载未归类标的失败:", e);
+    }
+  };
 
   const fetchPoolData = async () => {
     setLoading(true);
@@ -150,9 +93,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
 
     // 动态计算每个二级分类的命中数量
     const subs = defs.map((def) => {
-      const count = items.filter((it) =>
-        def.kws.some((k) => it.name.includes(k))
-      ).length;
+      const count = items.filter((it) => matchesSubSector(it.name, def.kws)).length;
       return { ...def, count };
     });
 
@@ -169,9 +110,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
         (s) => s.name === selectedSubSector
       );
       if (targetDef && targetDef.kws.length > 0) {
-        result = result.filter((it) =>
-          targetDef.kws.some((k) => it.name.includes(k))
-        );
+        result = result.filter((it) => matchesSubSector(it.name, targetDef.kws));
       }
     }
 
@@ -188,6 +127,15 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     return result;
   }, [poolData.items, selectedSector, selectedSubSector, searchKeyword]);
 
+  const renderedItems = filteredItems.slice(0, CARD_RENDER_LIMIT);
+  const sectorHitCount =
+    selectedSector === "全部"
+      ? poolData.total || 0
+      : sectorCountMap[selectedSector] ?? filteredItems.length;
+  const usesClientFilter = selectedSubSector !== "全部" || Boolean(searchKeyword.trim());
+  const hitCount = usesClientFilter ? filteredItems.length : sectorHitCount;
+  const truncationLabel = buildTruncationLabel(hitCount, renderedItems.length);
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 p-6 sm:p-8 space-y-6">
       {/* 标题栏与双重护城河介绍 */}
@@ -201,6 +149,12 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
             <span className="bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 text-xs px-2.5 py-1 rounded-full font-bold border border-emerald-200 dark:border-emerald-800">
               本地 SQLite 毫秒直出
             </span>
+            <Link
+              to="/grid-fit"
+              className="text-xs font-semibold text-indigo-700 underline"
+            >
+              网格适合度榜
+            </Link>
           </div>
           <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400 mt-1.5 flex items-center gap-1.5">
             <span>🛡️</span>
@@ -234,7 +188,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
-          {ALL_PRIMARY_SECTORS.map((sector) => {
+          {PRIMARY_SECTORS.map((sector) => {
             const isSelected = selectedSector === sector;
             const count =
               sector === "全部"
@@ -341,6 +295,32 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
         </div>
       </div>
 
+      {poolData.unclassified_count > 0 && (
+        <div className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 px-4 py-3">
+          <button
+            type="button"
+            onClick={() => {
+              const next = !showUnclassified;
+              setShowUnclassified(next);
+              if (next && unclassifiedItems.length === 0) {
+                fetchUnclassified();
+              }
+            }}
+            className="text-xs font-semibold text-gray-500 dark:text-gray-400"
+          >
+            {showUnclassified ? "收起" : "展开"}未归类（{poolData.unclassified_count}）· 不进入选品与回测宇宙
+          </button>
+          {showUnclassified && (
+            <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              这些名称无法归入 11 个可购赛道，默认不出现在主列表。它们不计入「全部」，也不进入网格适合度榜。
+              {unclassifiedItems.length > 0
+                ? ` ${unclassifiedItems.map((item) => item.name).slice(0, 8).join("、")}${unclassifiedItems.length > 8 ? "…" : ""}`
+                : ""}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* 标的卡片网格列表 */}
       {loading ? (
         <div className="py-12 flex flex-col items-center justify-center space-y-3">
@@ -352,8 +332,16 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
           未匹配到符合条件的标的，可尝试切换其他细分赛道
         </div>
       ) : (
+        <div className="space-y-3">
+          {truncationLabel && (
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              {truncationLabel}
+              。标题中的总数是当前赛道命中数，不是本页已画出的卡片数。
+              {searchKeyword.trim() ? " 搜索只作用于已返回列表，不是全宇宙。" : ""}
+            </p>
+          )}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredItems.slice(0, 48).map((item) => {
+          {renderedItems.map((item) => {
             const isUp = item.pct_change >= 0;
             return (
               <div
@@ -441,6 +429,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
               </div>
             );
           })}
+        </div>
         </div>
       )}
     </div>

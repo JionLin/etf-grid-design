@@ -98,6 +98,11 @@ class ETFAnalysisService:
         force_refresh: bool = False
     ) -> Dict[str, Any]:
         """获取全市场做 T ETF 标的池及赛道分布统计（默认月均成交额 >= 3000 万元，ATR >= 1.5%）"""
+        if not getattr(self.akshare_client, "_pool_taxonomy_refreshed", False):
+            self.akshare_client.pool_repo.reclassify_persisted(
+                self.akshare_client.classify_etf_item
+            )
+            self.akshare_client._pool_taxonomy_refreshed = True
         # 确保标的池已构建
         self.akshare_client.build_or_get_etf_pool(
             min_amount_10k=min_amount_10k,
@@ -121,6 +126,7 @@ class ETFAnalysisService:
         return {
             "total": summary.get("total_count", len(items)),
             "t0_total": summary.get("t0_count", 0),
+            "unclassified_count": summary.get("unclassified_count", 0),
             "sectors_summary": summary.get("sectors", []),
             "items": items
         }

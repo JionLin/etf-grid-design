@@ -257,6 +257,20 @@ class BacktestRepository:
         logger.info(f"回测快照归档成功: run_id={run_id}, etf={etf_code}, trades={total_trades}")
         return run_id
 
+    @staticmethod
+    def step_bucket(step_mode: Optional[str]) -> str:
+        if step_mode in ("atr", "fixed_eda"):
+            return step_mode
+        return "unknown"
+
+    @staticmethod
+    def step_label(step_mode: Optional[str]) -> str:
+        if step_mode == "atr":
+            return "ATR 自适应"
+        if step_mode == "fixed_eda":
+            return "自定义网格"
+        return "未知"
+
     def list_runs(
         self,
         etf_code: Optional[str] = None,
@@ -264,8 +278,11 @@ class BacktestRepository:
         limit: int = 50,
         offset: int = 0,
         latest_only: bool = True,
+        step_mode: Optional[str] = None,
+        sector: Optional[str] = None,
+        sector_map: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """获取回测档案轻量列表 (支持按标的+周期去重，仅展示最新一条)"""
+        """获取回测档案轻量列表。赛道按传入映射实时解析，筛选发生在分页之前。"""
         conditions = []
         params: List[Any] = []
 
@@ -277,69 +294,71 @@ class BacktestRepository:
             conditions.append("backtest_days = ?")
             params.append(int(days))
 
+        if step_mode == "atr":
+            conditions.append("step_mode = ?")
+            params.append("atr")
+        elif step_mode == "fixed_eda":
+            conditions.append("step_mode = ?")
+            params.append("fixed_eda")
+        elif step_mode == "unknown":
+            conditions.append("step_mode NOT IN ('atr', 'fixed_eda')")
+
+        step_window = "CASE WHEN step_mode IN ('atr', 'fixed_eda') THEN step_mode ELSE 'unknown' END"
+        select_cols = """
+            run_id, created_at, etf_code, etf_name, backtest_days, actual_days,
+            total_capital, step_mode, reinvest_mode,
+            annual_return, max_drawdown, total_profit, total_trades, free_shares,
+            is_partial_history, partial_reason, params_json, id
+        """
         if latest_only:
-            query = """
-                SELECT 
-                    run_id, created_at, etf_code, etf_name, backtest_days, actual_days,
-                    total_capital, step_mode, reinvest_mode,
-                    annual_return, max_drawdown, total_profit, total_trades, free_shares,
-                    is_partial_history, partial_reason, params_json
+            query = f"""
+                SELECT {select_cols}
                 FROM (
                     SELECT *,
-                        ROW_NUMBER() OVER (PARTITION BY etf_code, backtest_days ORDER BY id DESC) as rn
-                    FROM backtest_runs
-            """
-            count_query = """
-                SELECT COUNT(*) as total FROM (
-                    SELECT id,
-                        ROW_NUMBER() OVER (PARTITION BY etf_code, backtest_days ORDER BY id DESC) as rn
+                        ROW_NUMBER() OVER (
+                            PARTITION BY etf_code, backtest_days, {step_window}
+                            ORDER BY id DESC
+                        ) as rn
                     FROM backtest_runs
             """
             if conditions:
-                where_clause = " WHERE " + " AND ".join(conditions)
-                query += where_clause
-                count_query += where_clause
-            query += ") WHERE rn = 1 ORDER BY backtest_days DESC, id DESC LIMIT ? OFFSET ?"
-            count_query += ") WHERE rn = 1"
+                query += " WHERE " + " AND ".join(conditions)
+            query += ") WHERE rn = 1 ORDER BY backtest_days DESC, id DESC"
         else:
-            query = """
-                SELECT 
-                    run_id, created_at, etf_code, etf_name, backtest_days, actual_days,
-                    total_capital, step_mode, reinvest_mode,
-                    annual_return, max_drawdown, total_profit, total_trades, free_shares,
-                    is_partial_history, partial_reason, params_json
-                FROM backtest_runs
-            """
-            count_query = "SELECT COUNT(*) as total FROM backtest_runs"
+            query = f"SELECT {select_cols} FROM backtest_runs"
             if conditions:
-                where_clause = " WHERE " + " AND ".join(conditions)
-                query += where_clause
-                count_query += where_clause
-            query += " ORDER BY backtest_days DESC, id DESC LIMIT ? OFFSET ?"
+                query += " WHERE " + " AND ".join(conditions)
+            query += " ORDER BY backtest_days DESC, id DESC"
 
-        fetch_params = params + [max(1, min(200, limit)), max(0, offset)]
-
+        sector_lookup = sector_map or {}
         conn = self._get_connection()
         try:
             cursor = conn.cursor()
-            cursor.execute(count_query, params)
-            total = cursor.fetchone()["total"]
-
-            cursor.execute(query, fetch_params)
+            cursor.execute(query, params)
             rows = cursor.fetchall()
-
-            records = []
-            for r in rows:
-                item = dict(r)
-                item["is_partial_history"] = bool(item["is_partial_history"])
-                try:
-                    item["params"] = json.loads(item.get("params_json") or "{}")
-                except Exception:
-                    item["params"] = {}
-                records.append(item)
-            return {"total": total, "records": records}
         finally:
             conn.close()
+
+        records = []
+        for row in rows:
+            item = dict(row)
+            item.pop("id", None)
+            mapped_sector = sector_lookup.get(item["etf_code"])
+            item["sector"] = mapped_sector or "未入池"
+            item["step_label"] = self.step_label(item.get("step_mode"))
+            item["is_partial_history"] = bool(item["is_partial_history"])
+            try:
+                item["params"] = json.loads(item.get("params_json") or "{}")
+            except Exception:
+                item["params"] = {}
+            if sector and item["sector"] != sector:
+                continue
+            records.append(item)
+
+        total = len(records)
+        start = max(0, offset)
+        end = start + max(1, min(200, limit))
+        return {"total": total, "records": records[start:end]}
 
     def get_run_detail(self, run_id: str) -> Optional[Dict[str, Any]]:
         """获取单次回测全量详情，反序列化 json 字段实现即时无损还原"""

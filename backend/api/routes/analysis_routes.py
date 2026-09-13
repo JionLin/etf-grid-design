@@ -6,12 +6,20 @@
 from flask import Blueprint, request, jsonify
 import traceback
 from services.analysis.etf_analysis_service import ETFAnalysisService
+from services.analysis.grid_fit_service import (
+    GridFitBoardService,
+    build_protocol_callbacks,
+    start_background_batch,
+)
 from repositories.backtest_repository import BacktestRepository
+from repositories.etf_pool_repository import ETFPoolRepository
 
 # 创建分析蓝图
 analysis_bp = Blueprint('analysis', __name__)
 etf_service = ETFAnalysisService()
 backtest_repo = BacktestRepository()
+pool_repo = ETFPoolRepository()
+grid_fit_service = GridFitBoardService()
 
 @analysis_bp.route('/api/analyze', methods=['POST'])
 def analyze_etf_strategy():
@@ -346,6 +354,8 @@ def get_backtest_records():
         offset = int(request.args.get('offset', 0))
         latest_only_param = request.args.get('latestOnly', request.args.get('latest_only', 'true'))
         latest_only = str(latest_only_param).lower() in ['true', '1', 'yes']
+        step_mode = request.args.get('stepMode') or request.args.get('step_mode')
+        sector = request.args.get('sector')
 
         records_data = backtest_repo.list_runs(
             etf_code=etf_code,
@@ -353,6 +363,9 @@ def get_backtest_records():
             limit=limit,
             offset=offset,
             latest_only=latest_only,
+            step_mode=step_mode,
+            sector=sector,
+            sector_map=pool_repo.list_sector_map(),
         )
         return jsonify({'success': True, 'data': records_data})
     except Exception as e:
@@ -391,6 +404,57 @@ def get_distinct_etfs_in_records():
         return jsonify({'success': True, 'data': etfs})
     except Exception as e:
         return jsonify({'success': False, 'error': f"获取标的列表失败: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/grid-fit/board', methods=['GET'])
+def get_grid_fit_board():
+    """适合度榜。读取独立榜表，不读个人回测档案。"""
+    try:
+        sector = request.args.get('sector')
+        payload = grid_fit_service.list_board(
+            sector=sector,
+            sector_map=pool_repo.list_sector_map(),
+        )
+        return jsonify({'success': True, 'data': payload})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"读取适合度榜失败: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/grid-fit/progress', methods=['GET'])
+def get_grid_fit_progress():
+    """查询本轮补齐进度。单只失败不让查询整体失败。"""
+    try:
+        payload = grid_fit_service.list_board(sector_map=pool_repo.list_sector_map())
+        return jsonify({
+            'success': True,
+            'data': {
+                'progress': payload['progress'],
+                'job': payload['job'],
+                'failed': payload['failed'],
+            },
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"读取适合度榜进度失败: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/grid-fit/refresh', methods=['POST'])
+def refresh_grid_fit():
+    """按锁定协议补行情并写榜。不调用个人档案自动归档。"""
+    try:
+        universe = pool_repo.list_shoppable_universe()
+        sync_fn, backtest_fn = build_protocol_callbacks(
+            etf_service,
+            etf_service.akshare_client,
+        )
+        started = start_background_batch(
+            universe,
+            sync_fn,
+            backtest_fn,
+            grid_fit_service.repo,
+        )
+        return jsonify({'success': True, 'data': started})
+    except Exception as e:
+        return jsonify({'success': False, 'error': f"启动适合度榜补齐失败: {str(e)}"}), 500
 
 
 @analysis_bp.route('/api/literature/eda-grid', methods=['GET'])

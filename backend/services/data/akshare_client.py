@@ -7,10 +7,10 @@ from typing import Optional, Dict, List, Any
 from .cache_service import EnhancedCache
 try:
     from repositories.market_data_repository import MarketDataRepository
-    from repositories.etf_pool_repository import ETFPoolRepository
+    from repositories.etf_pool_repository import ETFPoolRepository, UNCLASSIFIED_SECTOR
 except ImportError:
     from backend.repositories.market_data_repository import MarketDataRepository
-    from backend.repositories.etf_pool_repository import ETFPoolRepository
+    from backend.repositories.etf_pool_repository import ETFPoolRepository, UNCLASSIFIED_SECTOR
 
 logger = logging.getLogger(__name__)
 
@@ -842,52 +842,69 @@ class AkShareClient:
             logger.warning(f"备用K线获取失败: {str(e)}")
             return None
 
+    _CASH_MARKERS = ('货币', '日利', '添益', '快钱', '快线', '财富宝')
+
     @staticmethod
     def classify_etf_item(name: str, code: str) -> Dict[str, Any]:
-        """对单只 ETF 进行 8 大产业链、日内 T+0 及弹性等级正交分类"""
-        is_t0 = False
-        if any(k in name for k in ['债', '短融', '存单', '黄金', '豆粕', '能源化工', '白银', '有色期货', '恒生', '港股', '纳斯达克', '纳指', '标普', '日经', '德国', '法国', '美股', '海外', '中概', '亚太']):
-            is_t0 = True
+        """按名称互斥归入 11 个可购赛道。货币类在赋波幅之前剔除，漏网记为未归类。"""
+        if any(marker in name for marker in AkShareClient._CASH_MARKERS):
+            return {
+                'excluded': True,
+                'sector': None,
+                'is_t0': False,
+                'atr_pct': 0.0,
+                'elasticity': None,
+            }
+
+        is_t0 = any(k in name for k in [
+            '债', '短融', '存单', '黄金', '豆粕', '能源化工', '白银', '有色期货',
+            '金ETF', '上海金', '恒生', '港股', '纳斯达克', '纳指', '标普', '日经',
+            '德国', '法国', '美股', '海外', '中概', '亚太', '道琼斯', '巴西', '日本东证',
+        ])
 
         if any(k in name for k in ['债', '短融', '存单']):
-            sector = '债券与固收'
-            base_atr = 0.4
-        elif any(k in name for k in ['黄金', '豆粕', '能源化工', '白银', '有色期货']):
-            sector = '大宗商品'
-            base_atr = 1.6
-        elif any(k in name for k in ['恒生', '港股', '纳斯达克', '标普', '日经', '德国', '法国', '中概', '亚太']):
-            sector = '跨境全球'
-            base_atr = 2.8
-        elif any(k in name for k in ['半导体', '芯片', '电子', '计算机', '软件', '通信', '人工智能', 'AI', '信创', '大数据', '传媒', '游戏', '物联网']):
-            sector = '科技芯片'
-            base_atr = 3.4
-        elif any(k in name for k in ['光伏', '新能源', '电池', '锂电', '风电', '储能', '汽车', '智能网联', '机械', '装备', '工业母机']):
-            sector = '新能源制造'
-            base_atr = 2.7
+            sector, base_atr = '债券与固收', 0.4
+        elif any(k in name for k in ['黄金', '豆粕', '能源化工', '白银', '有色期货', '金ETF', '上海金']):
+            sector, base_atr = '大宗商品', 1.6
+        elif any(k in name for k in [
+            '恒生', '港股', '纳斯达克', '纳指', '标普', '日经', '德国', '法国',
+            '中概', '亚太', '道琼斯', '巴西', '日本东证',
+        ]):
+            sector, base_atr = '跨境全球', 2.8
+        elif any(k in name for k in [
+            '半导体', '芯片', '电子', '计算机', '软件', '通信', '人工智能', 'AI',
+            '信创', '大数据', '传媒', '游戏', '物联网', '机器人', '卫星', '云计算',
+            '集成电路', '科技ETF', '5G', '影视',
+        ]):
+            sector, base_atr = '科技芯片', 3.4
+        elif any(k in name for k in [
+            '光伏', '新能源', '电池', '锂电', '风电', '储能', '汽车', '智能网联',
+            '机械', '装备', '工业母机', '机床', '电网设备', '船舶',
+        ]):
+            sector, base_atr = '新能源制造', 2.7
         elif any(k in name for k in ['医药', '医疗', '创新药', '中药', '生物', '疫苗']):
-            sector = '医药健康'
-            base_atr = 2.2
-        elif any(k in name for k in ['证券', '券商', '银行', '保险', '地产', '金融科技']):
-            sector = '大金融'
-            base_atr = 2.1
-        elif any(k in name for k in ['消费', '白酒', '酒', '食品', '饮料', '家电', '农业', '养殖', '畜牧', '旅游']):
-            sector = '大消费'
-            base_atr = 2.0
-        elif any(k in name for k in ['煤炭', '钢铁', '有色', '化工', '稀土', '金属', '油气', '能源', '资源']):
-            sector = '周期资源'
-            base_atr = 2.4
+            sector, base_atr = '医药健康', 2.2
+        elif any(k in name for k in ['证券', '券商', '银行', '保险', '地产', '金融科技', '金融ETF']):
+            sector, base_atr = '大金融', 2.1
+        elif any(k in name for k in ['消费', '白酒', '酒', '食品', '饮料', '家电', '农业', '养殖', '畜牧', '旅游', '粮食']):
+            sector, base_atr = '大消费', 2.0
+        elif any(k in name for k in [
+            '煤炭', '钢铁', '有色', '化工', '稀土', '金属', '油气', '能源', '资源',
+            '石油', '石化', '矿业', '建材',
+        ]):
+            sector, base_atr = '周期资源', 2.4
         elif any(k in name for k in ['电力', '绿电', '公用', '基建', '水务', '红利', '高股息', '低波']):
-            sector = '公用红利'
-            base_atr = 1.5
+            sector, base_atr = '公用红利', 1.5
         elif any(k in name for k in ['军工', '航天', '国防', '航空']):
-            sector = '国防军工'
-            base_atr = 2.6
-        elif any(k in name for k in ['300', '500', '1000', '2000', '50', '创业板', '科创50', '科创100', 'A50', 'A500', '中证A', '综指']):
-            sector = '核心宽基'
-            base_atr = 1.9
+            sector, base_atr = '国防军工', 2.6
+        elif any(k in name for k in [
+            '300', '500', '1000', '2000', '50', '创业板', '科创50', '科创100',
+            'A50', 'A500', '中证A', '综指', '上证', '深证', '中证800',
+            '科创200', '科创创业', '价值', '成长', '现金流',
+        ]):
+            sector, base_atr = '核心宽基', 1.9
         else:
-            sector = '其他主题'
-            base_atr = 2.0
+            sector, base_atr = UNCLASSIFIED_SECTOR, 2.0
 
         if base_atr >= 3.0:
             elasticity = '高弹性'
@@ -897,10 +914,11 @@ class AkShareClient:
             elasticity = '低波防守'
 
         return {
+            'excluded': False,
             'sector': sector,
             'is_t0': is_t0,
             'atr_pct': base_atr,
-            'elasticity': elasticity
+            'elasticity': elasticity,
         }
 
     def build_or_get_etf_pool(
@@ -950,6 +968,8 @@ class AkShareClient:
                     continue
 
                 classification = self.classify_etf_item(name, clean_code)
+                if classification.get('excluded'):
+                    continue
 
                 # 3. 第三重护城河：波动率盈利空间 ATR >= 1.5%（排除死水纯债与短融类）
                 if classification['atr_pct'] < min_atr_pct:

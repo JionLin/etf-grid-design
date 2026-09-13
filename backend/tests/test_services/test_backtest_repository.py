@@ -210,6 +210,37 @@ class TestBacktestRepository(unittest.TestCase):
         assert rec_fixed is not None
         self.assertEqual(rec_fixed['created_at'], "2026-09-12 20:00:00")
 
+    def test_sector_filter_keeps_unpooled_out_of_shoppable(self):
+        mock = {'summary': {'annualized_return': 1.0, 'grid_cash_profit': 10}, 'history_meta': {'actual_calendar_days': 180}}
+        self.repo.save_run('515220', '煤炭ETF', 180, 30000, 'atr', 'pool_shares', mock)
+        self.repo.save_run('511360', '短融ETF', 180, 30000, 'atr', 'pool_shares', mock)
+        sector_map = {'515220': '周期资源'}
+
+        coal = self.repo.list_runs(sector='周期资源', sector_map=sector_map, latest_only=False)
+        self.assertEqual([item['etf_code'] for item in coal['records']], ['515220'])
+
+        unpooled = self.repo.list_runs(sector='未入池', sector_map=sector_map, latest_only=False)
+        self.assertEqual([item['etf_code'] for item in unpooled['records']], ['511360'])
+        self.assertNotIn('511360', [item['etf_code'] for item in coal['records']])
+
+    def test_latest_only_keeps_both_step_modes_and_hides_unknown_from_atr(self):
+        mock = {'summary': {'annualized_return': 1.0, 'grid_cash_profit': 10}, 'history_meta': {'actual_calendar_days': 180}}
+        self.repo.save_run('515220', '煤炭ETF', 1825, 30000, 'atr', 'pool_shares', mock)
+        self.repo.save_run('515220', '煤炭ETF', 180, 30000, 'atr', 'pool_shares', mock)
+        self.repo.save_run('515220', '煤炭ETF', 180, 30000, 'atr', 'pool_shares', mock)
+        self.repo.save_run('515220', '煤炭ETF', 180, 30000, 'fixed_eda', 'pool_shares', mock)
+        self.repo.save_run('515220', '煤炭ETF', 180, 30000, 'composite', 'pool_shares', mock)
+
+        both = self.repo.list_runs(etf_code='515220', latest_only=True)
+        modes = {(item['backtest_days'], item['step_mode']) for item in both['records']}
+        self.assertIn((180, 'atr'), modes)
+        self.assertIn((180, 'fixed_eda'), modes)
+        self.assertEqual(both['records'][0]['backtest_days'], 1825)
+
+        atr_only = self.repo.list_runs(etf_code='515220', step_mode='atr', latest_only=True)
+        self.assertTrue(all(item['step_mode'] == 'atr' for item in atr_only['records']))
+        self.assertTrue(all(item['step_label'] != '未知' for item in atr_only['records']))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -166,6 +166,17 @@ class ApiService {
   async getBacktestDistinctETFs() {
     return this.get("/backtest/distinct-etfs");
   }
+
+  /**
+   * 适合度榜。与个人回测档案不是同一份列表。
+   */
+  async getGridFitBoard(params = {}) {
+    return this.get("/grid-fit/board", params);
+  }
+
+  async refreshGridFit() {
+    return this.post("/grid-fit/refresh", {});
+  }
 }
 
 // 创建单例实例
@@ -186,5 +197,7 @@ export const getBacktestRecords = (params) => apiService.getBacktestRecords(para
 export const getBacktestRecordDetail = (runId) => apiService.getBacktestRecordDetail(runId);
 export const deleteBacktestRecord = (runId) => apiService.deleteBacktestRecord(runId);
 export const getBacktestDistinctETFs = () => apiService.getBacktestDistinctETFs();
+export const getGridFitBoard = (params) => apiService.getGridFitBoard(params);
+export const refreshGridFit = () => apiService.refreshGridFit();
 
 export default apiService;

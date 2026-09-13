@@ -6,6 +6,7 @@ import {
 } from "react-router-dom";
 import HomePage from "@pages/HomePage";
 import AnalysisPage from "@pages/AnalysisPage";
+import GridFitPage from "@pages/GridFitPage";
 
 /**
  * 应用路由配置组件
@@ -17,6 +18,7 @@ export default function AppRouter() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/analysis/:etfCode" element={<AnalysisPage />} />
+        <Route path="/grid-fit" element={<GridFitPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>
