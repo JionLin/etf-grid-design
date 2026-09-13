@@ -199,3 +199,7 @@ class MarketDataRepository:
         except Exception as e:
             logger.error(f"提取本地日 K 线时序数据失败 ({etf_code}): {e}")
             return pd.DataFrame()
+
+    def get_all_bars(self, etf_code: str) -> pd.DataFrame:
+        """从本地 SQLite 提取标的上市以来的全部日 K 线数据"""
+        return self.get_bars(etf_code=etf_code, start_date=None, end_date=None)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
 import { Settings, Clock, Calendar, PiggyBank, Layers, TrendingUp, Sparkles, Anchor, Plus, Minus, RotateCcw, Sliders, AlertCircle } from "lucide-react";
 import { usePersistedState } from "@shared/hooks";
 import { validateETFCode, validateCapital } from "@shared/utils/validation";
@@ -14,7 +14,10 @@ import DisclaimerModal from "./DisclaimerModal";
  * 参数表单容器组件
  * 负责协调各个输入组件和表单验证
  */
-const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
+const ParameterForm = forwardRef(function ParameterForm(
+  { onAnalysis, loading, initialValues },
+  ref,
+) {
   // 状态管理
   const [etfCode, setEtfCode] = usePersistedState(
     "etfCode",
@@ -74,8 +77,8 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
     initialValues?.benchmarkPrice ? initialValues.benchmarkPrice.toString() : "",
   );
 
-  const [popularETFs, setPopularETFs] = useState([]);
   const [capitalPresets, setCapitalPresets] = useState([]);
+  const codeInputRef = useRef(null);
   const [etfInfo, setEtfInfo] = useState(null);
   const [etfLoading, setEtfLoading] = useState(false);
   const [errors, setErrors] = useState({});
@@ -127,17 +130,20 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
     setAdjustmentCoefficient,
   ]);
 
-  // 获取热门ETF列表
-  useEffect(() => {
-    fetch("/api/popular-etfs")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success) {
-          setPopularETFs(data.data);
+  useImperativeHandle(ref, () => ({
+    selectEtf(code) {
+      const normalizedCode = String(code ?? "").replace(/\D/g, "").slice(0, 6);
+      setEtfCode(normalizedCode);
+      window.requestAnimationFrame(() => {
+        const input = codeInputRef.current;
+        if (!input) {
+          return;
         }
-      })
-      .catch((err) => console.error("获取热门ETF失败:", err));
-  }, []);
+        input.scrollIntoView({ behavior: "smooth", block: "center" });
+        input.focus();
+      });
+    },
+  }), [setEtfCode]);
 
   // 获取资金预设
   useEffect(() => {
@@ -388,9 +394,9 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
           value={etfCode}
           onChange={setEtfCode}
           error={errors.etfCode}
-          popularETFs={popularETFs}
           etfInfo={etfInfo}
           loading={etfLoading}
+          inputRef={codeInputRef}
         />
 
         {/* 基准价格锚点设置 (最新市价 vs 自定义持仓成本价) */}
@@ -1087,6 +1093,6 @@ const ParameterForm = ({ onAnalysis, loading, initialValues }) => {
       />
     </div>
   );
-};
+});
 
 export default ParameterForm;

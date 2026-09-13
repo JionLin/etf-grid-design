@@ -87,6 +87,44 @@ class ETFAnalysisService:
         """获取热门ETF列表"""
         return self.popular_etfs
 
+    def get_etf_pool(
+        self,
+        sector: Optional[str] = None,
+        is_t0: Optional[bool] = None,
+        elasticity: Optional[str] = None,
+        min_amount_10k: float = 0.0,
+        min_ma20_amount_10k: float = 3000.0,
+        min_atr_pct: float = 1.5,
+        force_refresh: bool = False
+    ) -> Dict[str, Any]:
+        """获取全市场做 T ETF 标的池及赛道分布统计（默认月均成交额 >= 3000 万元，ATR >= 1.5%）"""
+        # 确保标的池已构建
+        self.akshare_client.build_or_get_etf_pool(
+            min_amount_10k=min_amount_10k,
+            min_ma20_amount_10k=min_ma20_amount_10k,
+            min_atr_pct=min_atr_pct,
+            force_refresh=force_refresh
+        )
+        items = self.akshare_client.pool_repo.get_pool(
+            sector=sector,
+            is_t0=is_t0,
+            elasticity=elasticity,
+            min_amount_10k=min_amount_10k,
+            min_ma20_amount_10k=min_ma20_amount_10k,
+            min_atr_pct=min_atr_pct,
+            limit=200
+        )
+        summary = self.akshare_client.pool_repo.get_sectors_summary(
+            min_ma20_amount_10k=min_ma20_amount_10k,
+            min_atr_pct=min_atr_pct
+        )
+        return {
+            "total": summary.get("total_count", len(items)),
+            "t0_total": summary.get("t0_count", 0),
+            "sectors_summary": summary.get("sectors", []),
+            "items": items
+        }
+
     def get_etf_basic_info(self, etf_code: str) -> Dict:
         """
         获取ETF基础信息

@@ -86,3 +86,39 @@ def get_capital_presets():
             'success': False,
             'error': '获取预设资金选项失败'
         }), 500
+
+
+@etf_bp.route('/api/etf/pool', methods=['GET'])
+def get_etf_pool():
+    """获取全市场做 T ETF 标的池及正交赛道统计"""
+    try:
+        from flask import request
+        sector = request.args.get('sector')
+        is_t0_param = request.args.get('is_t0')
+        is_t0 = True if is_t0_param in ('true', '1', 'True') else (False if is_t0_param in ('false', '0', 'False') else None)
+        elasticity = request.args.get('elasticity')
+        min_amount = float(request.args.get('min_amount', 0.0))
+        min_ma20_amount = float(request.args.get('min_ma20_amount', 3000.0))
+        min_atr = float(request.args.get('min_atr', 1.5))
+        force_refresh = request.args.get('refresh') in ('true', '1')
+
+        pool_data = etf_service.get_etf_pool(
+            sector=sector,
+            is_t0=is_t0,
+            elasticity=elasticity,
+            min_amount_10k=min_amount,
+            min_ma20_amount_10k=min_ma20_amount,
+            min_atr_pct=min_atr,
+            force_refresh=force_refresh
+        )
+        return jsonify({
+            'success': True,
+            'data': pool_data
+        })
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"获取ETF做T标的池失败: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': f'获取标的池失败: {str(e)}'
+        }), 500

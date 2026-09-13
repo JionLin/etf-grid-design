@@ -1,6 +1,7 @@
 import React, { useRef } from "react";
 import { Helmet } from "react-helmet-async";
 import HeroSection from "./components/HeroSection";
+import ETFActivePoolRadar from "./components/ETFActivePoolRadar";
 import ParameterForm from "@features/analysis/components/ParameterForm";
 import AnalysisHistory from "@features/history/components/AnalysisHistory";
 import { generateAnalysisURL } from "@shared/utils/url";
@@ -10,6 +11,7 @@ import { generateAnalysisURL } from "@shared/utils/url";
  * 负责展示首页内容和处理分析请求
  */
 export default function HomePage() {
+  const formSectionRef = useRef(null);
   const parameterFormRef = useRef(null);
 
   // 处理分析请求 - 跳转到分析页面
@@ -18,10 +20,13 @@ export default function HomePage() {
     window.location.href = analysisUrl;
   };
 
-  // 滚动到策略参数设置
+  const handleSelectETF = (code) => {
+    parameterFormRef.current?.selectEtf(code);
+  };
+
   const scrollToParameterForm = () => {
-    if (parameterFormRef.current) {
-      parameterFormRef.current.scrollIntoView({
+    if (formSectionRef.current) {
+      formSectionRef.current.scrollIntoView({
         behavior: "smooth",
         block: "start",
       });
@@ -41,8 +46,11 @@ export default function HomePage() {
       <div className="space-y-8">
         <HeroSection onStartAnalysis={scrollToParameterForm} />
 
-        <div ref={parameterFormRef}>
-          <ParameterForm onAnalysis={handleAnalysis} />
+        {/* 全市场做 T 标的池严选雷达 */}
+        <ETFActivePoolRadar onSelectETF={handleSelectETF} />
+
+        <div ref={formSectionRef}>
+          <ParameterForm ref={parameterFormRef} onAnalysis={handleAnalysis} />
         </div>
 
         <AnalysisHistory />
