@@ -112,7 +112,9 @@ class AkShareClient:
             return self.market_repo.get_bars(clean_code, start_date=norm_start, end_date=norm_end)
 
         # 场景 B: 最新端缺口比对 (local_max < norm_end)
-        if local_max < norm_end:
+        gap_days = (datetime.strptime(norm_end, "%Y-%m-%d") - datetime.strptime(local_max, "%Y-%m-%d")).days
+        is_weekend = datetime.strptime(norm_end, "%Y-%m-%d").weekday() >= 5
+        if local_max < norm_end and not (is_weekend and gap_days <= 3):
             try:
                 next_day = (datetime.strptime(local_max, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y%m%d")
                 target_end = end_date.replace("-", "")

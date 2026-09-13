@@ -27,6 +27,7 @@ dependencies = [
     "gunicorn>=23.0.0",
     "gevent>=25.9.1",
     "akshare>=1.17.61",
+    "pymysql>=1.2.0",
 ]
 
 [project.optional-dependencies]

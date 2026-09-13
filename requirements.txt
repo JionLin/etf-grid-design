@@ -26,6 +26,8 @@ pydantic-settings==2.11.0
     # via etf-grid-design (pyproject.toml)
 python-dateutil==2.9.0.post0
     # via etf-grid-design (pyproject.toml)
+pymysql==1.2.0
+    # via etf-grid-design (pyproject.toml)
 python-dotenv==1.1.1
     # via etf-grid-design (pyproject.toml)
 pytz==2025.2
