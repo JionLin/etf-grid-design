@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
 import {
   Database,
   RefreshCw,
@@ -14,12 +13,21 @@ import {
   Calendar,
   Sparkles,
   TrendingUp,
+  Search,
+  CheckCircle2,
+  AlertTriangle,
+  Award,
+  BarChart3,
+  ListFilter,
+  FileSpreadsheet,
 } from "lucide-react";
 import {
   getBacktestRecords,
   getBacktestRecordDetail,
   deleteBacktestRecord,
   getBacktestDistinctETFs,
+  getUniverseBacktestMatrix,
+  getSectorsRanking,
   isAbortError,
 } from "@shared/services/api";
 import {
@@ -29,9 +37,31 @@ import {
   buildArchiveListParams,
 } from "./archiveFilters";
 
-export default function BacktestArchiveView({ onApplyParams }) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+export default function BacktestArchiveView({ onApplyParams, isEmbedded = false }) {
+  // 当前活动的主视图: 'matrix' (多周期矩阵) | 'sectors' (11大赛道横评) | 'records' (明细流水账)
+  const [activeView, setActiveView] = useState("matrix");
+
+  // 收益显示模式: 'annual' (年化收益率) | 'total' (累计总收益率)
+  const [yieldDisplayMode, setYieldDisplayMode] = useState("annual");
+
+  // 提示信息
+  const [appliedNotice, setAppliedNotice] = useState(null);
+
+  // ================= 1. 矩阵看板状态 =================
+  const [matrixLoading, setMatrixLoading] = useState(false);
+  const [matrixError, setMatrixError] = useState(null);
+  const [matrixData, setMatrixData] = useState({ records: [], sectors: [] });
+  const [matrixSearch, setMatrixSearch] = useState("");
+  const [matrixSector, setMatrixSector] = useState("全部");
+  const [matrixSortField, setMatrixSortField] = useState("5y"); // '5y' | '3y' | '1y' | '180d' | '90d'
+  const [matrixSortOrder, setMatrixSortOrder] = useState("desc");
+  const [onlyValid5y, setOnlyValid5y] = useState(false);
+  const [matrixPage, setMatrixPage] = useState(1);
+  const matrixPageSize = 25;
+
+  // ================= 2. 个人流水账状态 =================
+  const [recordsLoading, setRecordsLoading] = useState(false);
+  const [recordsError, setRecordsError] = useState(null);
   const [records, setRecords] = useState([]);
   const [distinctEtfs, setDistinctEtfs] = useState([]);
   const [selectedEtf, setSelectedEtf] = useState("");
@@ -39,17 +69,14 @@ export default function BacktestArchiveView({ onApplyParams }) {
   const [selectedSector, setSelectedSector] = useState("全部");
   const [selectedStepMode, setSelectedStepMode] = useState("");
   const [latestOnly, setLatestOnly] = useState(true);
-  const [appliedNotice, setAppliedNotice] = useState(null);
 
-  // 展开查看详情的状态
+  // 展开流水详情
   const [expandedRunId, setExpandedRunId] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState({});
-
-  // 详情内部的分轨与分页
   const [detailRail, setDetailRail] = useState("all");
-  const [pageSize, setPageSize] = useState(20);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [detailPage, setDetailPage] = useState(1);
+  const detailPageSize = 20;
 
   // 格式化测算时间
   const formatRecordTime = (timeStr) => {
@@ -60,7 +87,27 @@ export default function BacktestArchiveView({ onApplyParams }) {
     return String(timeStr);
   };
 
-  // 加载档案列表与标的列表
+  // 1. 加载矩阵数据
+  const loadMatrix = async (signal) => {
+    setMatrixLoading(true);
+    setMatrixError(null);
+    try {
+      const res = await getUniverseBacktestMatrix({}, { signal });
+      if (signal?.aborted) return;
+      if (res?.success && res.data) {
+        setMatrixData(res.data);
+      } else {
+        setMatrixError(res?.error || "加载回测矩阵失败");
+      }
+    } catch (err) {
+      if (isAbortError(err) || signal?.aborted) return;
+      setMatrixError(err?.message || "网络请求异常");
+    } finally {
+      if (!signal?.aborted) setMatrixLoading(false);
+    }
+  };
+
+  // 2. 加载流水账与已测标的
   const loadDistinctEtfs = async () => {
     try {
       const etfRes = await getBacktestDistinctETFs();
@@ -73,8 +120,8 @@ export default function BacktestArchiveView({ onApplyParams }) {
   };
 
   const loadRecords = async (signal) => {
-    setLoading(true);
-    setError(null);
+    setRecordsLoading(true);
+    setRecordsError(null);
     try {
       const params = buildArchiveListParams({
         etfCode: selectedEtf,
@@ -88,30 +135,79 @@ export default function BacktestArchiveView({ onApplyParams }) {
 
       if (res?.success && res.data) {
         const rawList = res.data.records || [];
-        const sortedList = rawList.slice().sort((a, b) => (Number(b.backtest_days) || 0) - (Number(a.backtest_days) || 0));
+        const sortedList = rawList
+          .slice()
+          .sort((a, b) => (Number(b.backtest_days) || 0) - (Number(a.backtest_days) || 0));
         setRecords(sortedList);
       } else {
-        setError(res?.error || "读取回测档案失败");
+        setRecordsError(res?.error || "读取回测档案失败");
       }
     } catch (err) {
       if (isAbortError(err) || signal?.aborted) return;
-      setError(err?.message || "网络请求异常");
+      setRecordsError(err?.message || "网络请求异常");
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted) setRecordsLoading(false);
     }
   };
 
   useEffect(() => {
+    const controller = new AbortController();
+    loadMatrix(controller.signal);
     loadDistinctEtfs();
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    loadRecords(controller.signal);
-    return () => controller.abort();
-  }, [selectedEtf, selectedDays, latestOnly, selectedSector, selectedStepMode]);
+    if (activeView === "records") {
+      const controller = new AbortController();
+      loadRecords(controller.signal);
+      return () => controller.abort();
+    }
+  }, [activeView, selectedEtf, selectedDays, latestOnly, selectedSector, selectedStepMode]);
 
-  // 切换展开/收起详情
+  // 矩阵过滤与排序
+  const filteredMatrixRecords = useMemo(() => {
+    const raw = matrixData.records || [];
+    let list = raw.filter((item) => {
+      // 搜索代码或名称
+      if (matrixSearch.trim()) {
+        const q = matrixSearch.trim().toLowerCase();
+        const codeMatch = item.etf_code?.toLowerCase().includes(q);
+        const nameMatch = item.etf_name?.toLowerCase().includes(q);
+        if (!codeMatch && !nameMatch) return false;
+      }
+      // 赛道过滤
+      if (matrixSector !== "全部" && item.sector !== matrixSector) {
+        return false;
+      }
+      // 仅看满期标的 (优先遵循当前排序列或 5 年成熟度)
+      if (onlyValid5y) {
+        const targetPeriod = matrixSortField || "5y";
+        const periodObj = item.periods?.[targetPeriod];
+        if (!periodObj || !periodObj.is_valid || periodObj.annual_return === null) return false;
+      }
+      return true;
+    });
+
+    // 排序
+    list.sort((a, b) => {
+      const valA = a.periods?.[matrixSortField]?.annual_return;
+      const valB = b.periods?.[matrixSortField]?.annual_return;
+      if (valA === null || valA === undefined) return 1;
+      if (valB === null || valB === undefined) return -1;
+      return matrixSortOrder === "desc" ? valB - valA : valA - valB;
+    });
+
+    return list;
+  }, [matrixData, matrixSearch, matrixSector, matrixSortField, matrixSortOrder, onlyValid5y]);
+
+  const totalMatrixPages = Math.ceil(filteredMatrixRecords.length / matrixPageSize) || 1;
+  const currentMatrixList = useMemo(() => {
+    const start = (matrixPage - 1) * matrixPageSize;
+    return filteredMatrixRecords.slice(start, start + matrixPageSize);
+  }, [filteredMatrixRecords, matrixPage]);
+
+  // 切换展开/收起详情 (流水账)
   const toggleDetail = async (runId) => {
     if (expandedRunId === runId) {
       setExpandedRunId(null);
@@ -119,7 +215,7 @@ export default function BacktestArchiveView({ onApplyParams }) {
     }
     setExpandedRunId(runId);
     setDetailRail("all");
-    setCurrentPage(1);
+    setDetailPage(1);
 
     if (!detailData[runId]) {
       setDetailLoading(true);
@@ -136,7 +232,7 @@ export default function BacktestArchiveView({ onApplyParams }) {
     }
   };
 
-  // 删除档案
+  // 删除流水档案
   const handleDelete = async (runId, e) => {
     e.stopPropagation();
     if (!window.confirm("确定要删除这条回测档案记录吗？")) return;
@@ -154,459 +250,782 @@ export default function BacktestArchiveView({ onApplyParams }) {
     }
   };
 
-  // 回填参数
-  const handleApplyParams = (record, e) => {
-    e.stopPropagation();
+  // 一键回填参数
+  const handleApplyMatrixParams = (item, e) => {
+    e?.stopPropagation();
+    if (onApplyParams) {
+      onApplyParams(
+        {
+          etfCode: item.etf_code,
+          totalCapital: 30000,
+          scalingRatio: 0.1,
+          reinvestMode: "pool_shares",
+          stepMode: "atr",
+          analysisDays: 180,
+        },
+        item
+      );
+    }
+    setAppliedNotice(`已成功将【${item.etf_code} ${item.etf_name}】参数与代码回填至策略设计器！`);
+    setTimeout(() => setAppliedNotice(null), 3500);
+  };
+
+  const handleApplyRecordParams = (record, e) => {
+    e?.stopPropagation();
     if (onApplyParams) {
       onApplyParams(record.params || {}, record);
     }
-    setAppliedNotice(`已成功将【${rec_label(record)}】参数回填至回测面板！`);
-    setTimeout(() => setAppliedNotice(null), 3000);
+    setAppliedNotice(`已成功将【${record.etf_code} ${record.etf_name}】历史回测参数回填！`);
+    setTimeout(() => setAppliedNotice(null), 3500);
   };
 
-  const rec_label = (r) => `${r.etf_code} ${r.etf_name} (${r.backtest_days}天)`;
+  // 导出矩阵 CSV
+  const handleExportMatrixCsv = () => {
+    const rows = filteredMatrixRecords;
+    if (!rows.length) return;
+    const headers = [
+      "ETF代码",
+      "ETF名称",
+      "所属赛道",
+      "90天年化",
+      "90天回撤",
+      "半年年化",
+      "半年回撤",
+      "1年年化",
+      "1年回撤",
+      "2年年化",
+      "2年回撤",
+      "3年年化",
+      "3年回撤",
+      "5年年化",
+      "5年回撤",
+      "5年留存股数",
+    ];
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((r) => {
+        const p = r.periods || {};
+        return [
+          r.etf_code,
+          `"${r.etf_name || ""}"`,
+          `"${r.sector || ""}"`,
+          p["90d"]?.annual_return ?? "",
+          p["90d"]?.max_drawdown ?? "",
+          p["180d"]?.annual_return ?? "",
+          p["180d"]?.max_drawdown ?? "",
+          p["1y"]?.annual_return ?? "",
+          p["1y"]?.max_drawdown ?? "",
+          p["2y"]?.annual_return ?? "",
+          p["2y"]?.max_drawdown ?? "",
+          p["3y"]?.annual_return ?? "",
+          p["3y"]?.max_drawdown ?? "",
+          p["5y"]?.annual_return ?? "",
+          p["5y"]?.max_drawdown ?? "",
+          p["5y"]?.free_shares ?? "",
+        ].join(",");
+      }),
+    ].join("\n");
 
-  // 当前展开记录的流水与分轨
-  const activeDetail = expandedRunId ? detailData[expandedRunId] : null;
-  const activeTrades = activeDetail?.trades || [];
-
-  const filteredTrades = useMemo(() => {
-    if (detailRail === "all") return activeTrades;
-    return activeTrades.filter((t) => t.rail === detailRail);
-  }, [activeTrades, detailRail]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredTrades.length / pageSize));
-  const paginatedTrades = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredTrades.slice(start, start + pageSize);
-  }, [filteredTrades, currentPage, pageSize]);
-
-  // 导出 CSV
-  const handleExportCsv = (record) => {
-    if (!filteredTrades.length) return;
-    const headers = ["成交时间", "动作", "轨道", "成交价格(元)", "成交股数", "成交金额(元)", "手续费(元)", "扣费净利(元)"];
-    const rows = filteredTrades.map((t) => [
-      t.trade_time,
-      t.action_label || (t.action === "SELL" ? "卖出" : "买入"),
-      t.rail_name || t.rail,
-      Number(t.price).toFixed(3),
-      t.shares,
-      t.amount,
-      t.fee,
-      t.action === "SELL" ? t.profit : "0.00",
-    ]);
-    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `回测档案_${record.etf_code}_${record.run_id}.csv`);
-    document.body.appendChild(link);
+    link.href = URL.createObjectURL(blob);
+    link.download = `ETF多周期网格回测矩阵_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  };
+
+  const renderReturnBadge = (periodObj) => {
+    if (!periodObj || !periodObj.is_valid || (periodObj.annual_return === null && periodObj.total_return === null)) {
+      return (
+        <span className="text-gray-300 font-mono text-xs" title={periodObj?.reason || "上市不足"}>
+          -
+        </span>
+      );
+    }
+    const isTotal = yieldDisplayMode === "total";
+    const mainVal = isTotal ? periodObj.total_return : periodObj.annual_return;
+    const subVal = isTotal ? periodObj.annual_return : periodObj.total_return;
+    const isPositive = (mainVal ?? 0) >= 0;
+
+    return (
+      <div className="flex flex-col items-end">
+        <span
+          className={`font-mono font-bold text-xs ${
+            isPositive ? "text-red-600" : "text-emerald-600"
+          }`}
+        >
+          {mainVal !== null && mainVal !== undefined ? (isPositive ? `+${mainVal}%` : `${mainVal}%`) : "-"}
+        </span>
+        <div className="flex items-center gap-1 text-[10px] text-gray-400 font-mono">
+          <span>{isTotal ? "年化" : "累计"} {subVal !== null && subVal !== undefined ? (subVal >= 0 ? `+${subVal}%` : `${subVal}%`) : "-"}</span>
+          {periodObj.max_drawdown !== null && (
+            <span>· 回撤 -{periodObj.max_drawdown}%</span>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-xs space-y-6">
-      {/* 头部导航与多维筛选 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-5">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-100/80 rounded-xl text-indigo-700">
-            <Database className="w-5 h-5" />
-          </div>
+    <div className="space-y-4">
+      {/* 顶部总标题与视图切换导航 */}
+      <div className={`flex flex-col md:flex-row md:items-center justify-between gap-3 ${isEmbedded ? "" : "border-b border-gray-100 pb-3"}`}>
+        {!isEmbedded ? (
           <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-bold text-gray-900">本地策略回测档案库</h3>
-              <Link
-                to="/grid-fit"
-                className="text-xs font-semibold text-indigo-700 underline"
-              >
-                网格适合度榜
-              </Link>
-              <span className="text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-mono">
-                本机 MySQL
-              </span>
-            </div>
+            <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+              <Database className="w-5 h-5 text-indigo-600" />
+              历史网格回测档案库
+            </h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              自动沉淀历次全量回测快照，支持无刷新免重算秒级复盘与多轨流水追溯
+              537 只成熟标的 5 年日线纯本地直出，包含多周期矩阵对比、11 大赛道胜率横评及历史快照
             </p>
           </div>
-        </div>
+        ) : (
+          <div className="text-xs text-gray-500 flex items-center gap-2">
+            <Award className="w-4 h-4 text-indigo-600" />
+            <span>全市场 537 标的多周期长跑回测大宽表 (纯本地 MySQL 毫秒直出)</span>
+          </div>
+        )}
 
-        {/* 筛选控制器 */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          {/* 标的筛选 */}
-          <select
-            value={selectedEtf}
-            onChange={(e) => setSelectedEtf(e.target.value)}
-            className="px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-700 font-medium focus:ring-1 focus:ring-indigo-500"
-          >
-            <option value="">全部已测标的</option>
-            {distinctEtfs.map((item) => (
-              <option key={item.etf_code} value={item.etf_code}>
-                {item.etf_code} {item.etf_name}
-              </option>
-            ))}
-          </select>
-
-          {/* 周期筛选 */}
-          <select
-            value={selectedDays}
-            onChange={(e) => setSelectedDays(e.target.value)}
-            className="px-2.5 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-700 font-medium focus:ring-1 focus:ring-indigo-500"
-          >
-            <option value="">全部周期</option>
-            <option value="90">90 天</option>
-            <option value="180">180 天</option>
-            <option value="365">1 年</option>
-            <option value="730">2 年</option>
-            <option value="1095">3 年</option>
-            <option value="1825">5 年 (牛熊)</option>
-          </select>
-
-          {/* 仅看各周期最新开关 */}
-          <label className="flex items-center gap-1.5 cursor-pointer text-xs text-gray-700 select-none bg-gray-50 border border-gray-200 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 transition-colors">
-            <input
-              type="checkbox"
-              checked={latestOnly}
-              onChange={(e) => setLatestOnly(e.target.checked)}
-              className="rounded text-indigo-600 focus:ring-indigo-500"
-            />
-            <span className="font-medium">仅看各周期最新</span>
-          </label>
-
-          {/* 刷新 */}
+        {/* 视图切换按钮组 */}
+        <div className="flex items-center bg-gray-100 p-1 rounded-xl shrink-0">
           <button
-            type="button"
-            onClick={loadRecords}
-            disabled={loading}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 font-medium"
+            onClick={() => setActiveView("matrix")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeView === "matrix"
+                ? "bg-white text-indigo-600 shadow-2xs font-bold"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            刷新
+            <Award className="w-3.5 h-3.5" />
+            🏆 多周期矩阵看板 ({filteredMatrixRecords.length})
+          </button>
+          <button
+            onClick={() => setActiveView("sectors")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeView === "sectors"
+                ? "bg-white text-indigo-600 shadow-2xs font-bold"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            📊 11 大赛道胜率横评
+          </button>
+          <button
+            onClick={() => setActiveView("records")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeView === "records"
+                ? "bg-white text-indigo-600 shadow-2xs font-bold"
+                : "text-gray-600 hover:text-gray-900"
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            📜 单测明细流水 ({records.length})
           </button>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {ARCHIVE_SECTORS.map((name) => (
-          <button
-            key={name}
-            type="button"
-            onClick={() => setSelectedSector(name)}
-            className={`rounded-full border px-3 py-1 text-xs font-medium ${
-              selectedSector === name
-                ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                : "border-gray-200 bg-white text-gray-600"
-            }`}
-          >
-            {name}
-          </button>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {ARCHIVE_STEP_FILTERS.map((item) => (
-          <button
-            key={item.id || "all-steps"}
-            type="button"
-            onClick={() => setSelectedStepMode(item.id)}
-            className={`rounded-full border px-3 py-1 text-xs font-medium ${
-              selectedStepMode === item.id
-                ? "border-indigo-500 bg-indigo-50 text-indigo-700"
-                : "border-gray-200 bg-white text-gray-600"
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      {/* 回填成功提示 */}
+      {/* 回填成功提示浮条 */}
       {appliedNotice && (
-        <div className="p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs border border-emerald-200 flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-emerald-600" />
-          <span>{appliedNotice}</span>
+        <div className="p-3 bg-emerald-50 text-emerald-800 rounded-xl text-xs border border-emerald-200 flex items-center gap-2 animate-fade-in">
+          <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span className="font-medium">{appliedNotice}</span>
         </div>
       )}
 
-      {/* 档案列表 */}
-      {error && (
-        <div className="p-4 bg-red-50 text-red-700 rounded-xl text-xs border border-red-200">
-          {error}
-        </div>
-      )}
-
-      {loading && records.length === 0 ? (
-        <div className="py-16 text-center text-gray-400 text-xs">
-          <RefreshCw className="w-6 h-6 animate-spin mx-auto text-indigo-500 mb-2" />
-          正在加载回测档案...
-        </div>
-      ) : records.length === 0 ? (
-        <div className="py-16 text-center text-gray-400 text-xs bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
-          <Database className="w-8 h-8 mx-auto text-gray-300 mb-2" />
-          暂无符合条件的回测档案。请在【历史策略回测】标签页运行回测，系统将自动归档。
-        </div>
-      ) : (
+      {/* ========================================================================= */}
+      {/* 视图 1: 多周期矩阵看板                                                   */}
+      {/* ========================================================================= */}
+      {activeView === "matrix" && (
         <div className="space-y-4">
-          {records.map((rec) => {
-            const isExpanded = expandedRunId === rec.run_id;
-            const currentDetail = detailData[rec.run_id];
+          {/* 筛选与检索控制条 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 bg-gray-50/70 p-3 rounded-xl border border-gray-100 text-xs items-center">
+            {/* 搜索 */}
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="搜索代码或名称..."
+                value={matrixSearch}
+                onChange={(e) => {
+                  setMatrixSearch(e.target.value);
+                  setMatrixPage(1);
+                }}
+                className="w-full pl-8 pr-3 py-1.5 bg-white border border-gray-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500 text-xs"
+              />
+            </div>
 
-            return (
-              <div
-                key={rec.run_id}
-                className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-2xs transition-all hover:border-indigo-300"
+            {/* 赛道筛选 */}
+            <div>
+              <select
+                value={matrixSector}
+                onChange={(e) => {
+                  setMatrixSector(e.target.value);
+                  setMatrixPage(1);
+                }}
+                className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500 text-xs"
               >
-                {/* 档案摘要行卡片 */}
-                <div
-                  onClick={() => toggleDetail(rec.run_id)}
-                  className="p-4 bg-gray-50/50 hover:bg-gray-50 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 rounded-lg bg-white border border-gray-200 text-indigo-600 font-mono font-bold text-xs">
-                      {rec.etf_code}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-gray-900 text-sm">{rec.etf_name}</span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-medium">
-                          {rec.backtest_days} 天 ({rec.actual_days} 交易日)
+                {ARCHIVE_SECTORS.map((s) => (
+                  <option key={s} value={s}>
+                    {s === "全部" ? "全部赛道" : s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* 排序周期选择 */}
+            <div>
+              <select
+                value={matrixSortField}
+                onChange={(e) => {
+                  setMatrixSortField(e.target.value);
+                  setMatrixPage(1);
+                }}
+                className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500 text-xs"
+              >
+                <option value="5y">按 5年年化 排序</option>
+                <option value="3y">按 3年年化 排序</option>
+                <option value="1y">按 1年年化 排序</option>
+                <option value="180d">按 半年年化 排序</option>
+                <option value="90d">按 90天年化 排序</option>
+              </select>
+            </div>
+
+            {/* 收益显示模式切换单选胶囊 (用户指定要求) */}
+            <div className="flex items-center bg-white p-0.5 rounded-lg border border-gray-200 shrink-0">
+              <span className="text-[11px] text-gray-500 font-medium px-1.5">口径:</span>
+              <button
+                type="button"
+                onClick={() => setYieldDisplayMode("total")}
+                className={`px-2 py-1 rounded text-[11px] font-medium transition-all ${
+                  yieldDisplayMode === "total"
+                    ? "bg-indigo-600 text-white font-bold shadow-2xs"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+                title="展示回测周期内真实累计总赚幅"
+              >
+                累计总收益
+              </button>
+              <button
+                type="button"
+                onClick={() => setYieldDisplayMode("annual")}
+                className={`px-2 py-1 rounded text-[11px] font-medium transition-all ${
+                  yieldDisplayMode === "annual"
+                    ? "bg-indigo-600 text-white font-bold shadow-2xs"
+                    : "text-gray-600 hover:text-gray-900"
+                }`}
+                title="折算为统一标准年化复合收益率"
+              >
+                年化收益率
+              </button>
+            </div>
+
+            {/* 仅看满期成熟标的快速开关 */}
+            <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+              <input
+                type="checkbox"
+                id="onlyValid5y"
+                checked={onlyValid5y}
+                onChange={(e) => {
+                  setOnlyValid5y(e.target.checked);
+                  setMatrixPage(1);
+                }}
+                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+              />
+              <label htmlFor="onlyValid5y" className="text-gray-700 dark:text-gray-200 cursor-pointer font-semibold text-[11px] flex items-center gap-1">
+                <span>仅看满期标的</span>
+                <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-mono">
+                  ({matrixSortField === "5y" ? "满5年" : matrixSortField === "3y" ? "满3年" : matrixSortField})
+                </span>
+              </label>
+            </div>
+
+            {/* 导出 CSV 按钮 */}
+            <div className="flex justify-end">
+              <button
+                onClick={handleExportMatrixCsv}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium transition-colors text-[11px]"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                导出 CSV
+              </button>
+            </div>
+          </div>
+
+          {/* 矩阵大宽表 */}
+          {matrixLoading ? (
+            <div className="py-20 text-center text-gray-400 text-xs">
+              <RefreshCw className="w-6 h-6 animate-spin mx-auto text-indigo-500 mb-2" />
+              正在加载全市场多周期回测矩阵...
+            </div>
+          ) : matrixError ? (
+            <div className="p-4 bg-red-50 text-red-700 rounded-xl text-xs border border-red-200">
+              {matrixError}
+            </div>
+          ) : filteredMatrixRecords.length === 0 ? (
+            <div className="py-16 text-center text-gray-400 text-xs bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+              暂无匹配的标的，请调整筛选条件。
+            </div>
+          ) : (
+            <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-2xs">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-gray-50/80 border-b border-gray-200 text-gray-600 font-semibold">
+                      <th className="py-2.5 px-3 w-12 text-center">序号</th>
+                      <th className="py-2.5 px-3 w-20">代码</th>
+                      <th className="py-2.5 px-3 w-36">标的简称</th>
+                      <th className="py-2.5 px-3 w-24">赛道</th>
+                      <th className="py-2.5 px-3 text-right">90天 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
+                      <th className="py-2.5 px-3 text-right">半年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
+                      <th className="py-2.5 px-3 text-right">1年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
+                      <th className="py-2.5 px-3 text-right">2年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
+                      <th className="py-2.5 px-3 text-right">3年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
+                      <th className="py-2.5 px-3 text-right bg-indigo-50/30 text-indigo-950 font-bold">
+                        5年 ({yieldDisplayMode === 'total' ? '累计' : '年化'}) / 留存股
+                      </th>
+                      <th className="py-2.5 px-3 w-28 text-center">快捷操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 font-mono">
+                    {currentMatrixList.map((item, idx) => {
+                      const p = item.periods || {};
+                      const rowNum = (matrixPage - 1) * matrixPageSize + idx + 1;
+                      const freeShares5y = p["5y"]?.free_shares;
+
+                      return (
+                        <tr
+                          key={item.etf_code}
+                          className="hover:bg-indigo-50/30 transition-colors"
+                        >
+                          <td className="py-2 px-3 text-center text-gray-400 font-sans text-[11px]">
+                            {rowNum}
+                          </td>
+                          <td className="py-2 px-3 font-bold text-indigo-600">
+                            {item.etf_code}
+                          </td>
+                          <td className="py-2 px-3 font-sans font-medium text-gray-900 truncate max-w-[140px]" title={item.etf_name}>
+                            {item.etf_name}
+                          </td>
+                          <td className="py-2 px-3 font-sans">
+                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px]">
+                              {item.sector || "未入池"}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3">{renderReturnBadge(p["90d"])}</td>
+                          <td className="py-2 px-3">{renderReturnBadge(p["180d"])}</td>
+                          <td className="py-2 px-3">{renderReturnBadge(p["1y"])}</td>
+                          <td className="py-2 px-3">{renderReturnBadge(p["2y"])}</td>
+                          <td className="py-2 px-3">{renderReturnBadge(p["3y"])}</td>
+                          <td className="py-2 px-3 bg-indigo-50/20 text-right">
+                            <div className="flex flex-col items-end">
+                              {renderReturnBadge(p["5y"])}
+                              {freeShares5y > 0 && (
+                                <span className="text-[10px] text-amber-700 font-medium">
+                                  🪙 留存 {freeShares5y.toLocaleString()} 股
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 px-3 text-center font-sans">
+                            <button
+                              onClick={(e) => handleApplyMatrixParams(item, e)}
+                              className="px-2.5 py-1 bg-white border border-indigo-200 hover:border-indigo-400 text-indigo-600 hover:bg-indigo-50 rounded text-[11px] font-medium transition-all shadow-2xs"
+                              title="将此标的代码与网格配置回填至首页策略设计器"
+                            >
+                              应用策略
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 分页控制栏 */}
+              <div className="p-3 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500 font-sans">
+                <div>
+                  显示 {(matrixPage - 1) * matrixPageSize + 1} 至{" "}
+                  {Math.min(matrixPage * matrixPageSize, filteredMatrixRecords.length)} 条，共{" "}
+                  {filteredMatrixRecords.length} 只标的
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    disabled={matrixPage <= 1}
+                    onClick={() => setMatrixPage((p) => Math.max(1, p - 1))}
+                    className="px-3 py-1 bg-white border border-gray-200 rounded disabled:opacity-40 hover:bg-gray-50"
+                  >
+                    上一页
+                  </button>
+                  <span className="font-mono">
+                    {matrixPage} / {totalMatrixPages}
+                  </span>
+                  <button
+                    disabled={matrixPage >= totalMatrixPages}
+                    onClick={() => setMatrixPage((p) => Math.min(totalMatrixPages, p + 1))}
+                    className="px-3 py-1 bg-white border border-gray-200 rounded disabled:opacity-40 hover:bg-gray-50"
+                  >
+                    下一页
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 视图 2: 11 大赛道胜率横评                                                 */}
+      {/* ========================================================================= */}
+      {activeView === "sectors" && (
+        <div className="space-y-4">
+          <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3.5 text-xs text-indigo-900 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Award className="w-4 h-4 text-indigo-600" />
+              <span>
+                基于 E 大网格 2.0（3w本金、自适应ATR、模式B留股、倒金字塔加码10%）评测 11 大赛道综合表现
+              </span>
+            </div>
+            <span className="text-gray-500 font-mono text-[11px]">
+              点击任一行可快速筛选该赛道标的
+            </span>
+          </div>
+
+          <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-2xs">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-gray-50/80 border-b border-gray-200 text-gray-600 font-semibold">
+                  <th className="py-3 px-4">赛道名称</th>
+                  <th className="py-3 px-4">标的规模 (5年有效)</th>
+                  <th className="py-3 px-4 text-right">5年正收益率 (胜率)</th>
+                  <th className="py-3 px-4 text-right">5年均年化收益</th>
+                  <th className="py-3 px-4 text-right">5年平均最大回撤</th>
+                  <th className="py-3 px-4 text-right">3年胜率</th>
+                  <th className="py-3 px-4">赛道标杆 Top Pick</th>
+                  <th className="py-3 px-4 text-center">操作</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {(matrixData.sectors || []).map((sec) => {
+                  const s5 = sec.stat_5y || {};
+                  const s3 = sec.stat_3y || {};
+                  const tp = sec.top_pick;
+
+                  return (
+                    <tr
+                      key={sec.sector}
+                      onClick={() => {
+                        setMatrixSector(sec.sector);
+                        setActiveView("matrix");
+                      }}
+                      className="hover:bg-indigo-50/40 cursor-pointer transition-colors"
+                    >
+                      <td className="py-3 px-4 font-bold text-gray-900 flex items-center gap-2">
+                        <span>{sec.sector}</span>
+                      </td>
+                      <td className="py-3 px-4 text-gray-600 font-mono">
+                        {sec.total_etfs} 只{" "}
+                        <span className="text-gray-400 text-[11px]">
+                          ({s5.valid_count || 0}只满5年)
                         </span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-slate-50 text-slate-700 border border-slate-200 font-medium">
-                          {rec.sector || "未入池"}
-                        </span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-mono">
-                          {archiveStepLabel(rec)}
-                        </span>
-                        {rec.reinvest_mode === "pool_shares" && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 font-medium">
-                            🪙 模式B留股 ({rec.free_shares}股)
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono font-bold">
+                        {s5.win_rate !== null ? (
+                          <span
+                            className={
+                              s5.win_rate >= 80 ? "text-red-600" : "text-gray-700"
+                            }
+                          >
+                            {s5.win_rate}%
                           </span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono font-bold">
+                        {s5.avg_annual_return !== null ? (
+                          <span
+                            className={
+                              s5.avg_annual_return >= 0 ? "text-red-600" : "text-emerald-600"
+                            }
+                          >
+                            {s5.avg_annual_return >= 0 ? `+${s5.avg_annual_return}%` : `${s5.avg_annual_return}%`}
+                          </span>
+                        ) : (
+                          "-"
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono text-gray-500">
+                        {s5.avg_max_drawdown !== null ? `-${s5.avg_max_drawdown}%` : "-"}
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono">
+                        {s3.win_rate !== null ? `${s3.win_rate}%` : "-"}
+                      </td>
+                      <td className="py-3 px-4 font-mono">
+                        {tp ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-indigo-600">{tp.etf_code}</span>
+                            <span className="text-gray-700 truncate max-w-[90px] font-sans">
+                              {tp.etf_name}
+                            </span>
+                            <span className="text-red-600 font-bold text-[11px]">
+                              (+{tp.annual_return}%)
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">暂无</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 text-center">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMatrixSector(sec.sector);
+                            setActiveView("matrix");
+                          }}
+                          className="px-2 py-1 text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded font-medium transition-colors"
+                        >
+                          查看标的
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 视图 3: 单测明细流水账 (保留原有完整功能)                                 */}
+      {/* ========================================================================= */}
+      {activeView === "records" && (
+        <div className="space-y-4">
+          {/* 筛选面板 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-gray-50/70 p-3 rounded-xl border border-gray-100 text-xs">
+            <div>
+              <label className="text-gray-500 mb-1 block">标的筛选</label>
+              <select
+                value={selectedEtf}
+                onChange={(e) => setSelectedEtf(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="">全部已测标的</option>
+                {distinctEtfs.map((item) => (
+                  <option key={item.etf_code} value={item.etf_code}>
+                    {item.etf_code} {item.etf_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-gray-500 mb-1 block">回测周期</label>
+              <select
+                value={selectedDays}
+                onChange={(e) => setSelectedDays(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+              >
+                <option value="">全部周期</option>
+                <option value="90">90 天</option>
+                <option value="180">180 天 (半年)</option>
+                <option value="365">365 天 (1年)</option>
+                <option value="730">730 天 (2年)</option>
+                <option value="1095">1095 天 (3年)</option>
+                <option value="1825">1825 天 (5年)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-gray-500 mb-1 block">所属赛道</label>
+              <select
+                value={selectedSector}
+                onChange={(e) => setSelectedSector(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+              >
+                {ARCHIVE_SECTORS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-gray-500 mb-1 block">步长模式</label>
+              <select
+                value={selectedStepMode}
+                onChange={(e) => setSelectedStepMode(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-white border border-gray-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+              >
+                {ARCHIVE_STEP_FILTERS.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-end pb-1">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={latestOnly}
+                  onChange={(e) => setLatestOnly(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <span className="text-gray-700 font-medium">仅看同条件最新记录</span>
+              </label>
+            </div>
+          </div>
+
+          {recordsError && (
+            <div className="p-4 bg-red-50 text-red-700 rounded-xl text-xs border border-red-200">
+              {recordsError}
+            </div>
+          )}
+
+          {recordsLoading ? (
+            <div className="py-16 text-center text-gray-400 text-xs">
+              <RefreshCw className="w-6 h-6 animate-spin mx-auto text-indigo-500 mb-2" />
+              正在加载回测明细流水...
+            </div>
+          ) : records.length === 0 ? (
+            <div className="py-16 text-center text-gray-400 text-xs bg-gray-50/50 rounded-xl border border-dashed border-gray-200">
+              暂无匹配的单测历史快照。可在【历史策略回测】运行单次回测后自动归档。
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {records.map((rec) => {
+                const isExpanded = expandedRunId === rec.run_id;
+                const currentDetail = detailData[rec.run_id];
+
+                return (
+                  <div
+                    key={rec.run_id}
+                    className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-2xs transition-all hover:border-indigo-300"
+                  >
+                    <div
+                      onClick={() => toggleDetail(rec.run_id)}
+                      className="p-4 bg-gray-50/50 hover:bg-gray-50 cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg bg-white border border-gray-200 text-indigo-600 font-mono font-bold text-xs">
+                          {rec.etf_code}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-gray-900 text-sm">
+                              {rec.etf_name}
+                            </span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 font-medium">
+                              {rec.backtest_days} 天 ({rec.actual_days} 交易日)
+                            </span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-50 text-slate-700 border border-slate-200 font-medium">
+                              {rec.sector || "未入池"}
+                            </span>
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-mono">
+                              {archiveStepLabel(rec)}
+                            </span>
+                            {rec.reinvest_mode === "pool_shares" && (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-300 font-medium">
+                                🪙 模式B留股 ({rec.free_shares}股)
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-4 text-xs text-gray-500 mt-1.5 font-mono">
+                            <span>测算时间: {formatRecordTime(rec.created_at)}</span>
+                            <span>初始本金: ¥{Number(rec.total_capital).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-6 font-mono text-xs">
+                        <div>
+                          <div className="text-gray-400 text-[11px]">年化收益率</div>
+                          <div
+                            className={`font-bold text-sm ${
+                              rec.annual_return >= 0 ? "text-red-600" : "text-emerald-600"
+                            }`}
+                          >
+                            {rec.annual_return >= 0 ? `+${rec.annual_return}%` : `${rec.annual_return}%`}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 text-[11px]">做 T 纯利润</div>
+                          <div className="font-bold text-sm text-red-600">
+                            ¥{Number(rec.total_profit).toLocaleString()}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 text-[11px]">最大回撤</div>
+                          <div className="font-bold text-sm text-gray-700">
+                            -{rec.max_drawdown}%
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-gray-400 text-[11px]">成交次数</div>
+                          <div className="font-bold text-sm text-gray-700">
+                            {rec.total_trades} 次
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 ml-2">
+                          <button
+                            onClick={(e) => handleApplyRecordParams(rec, e)}
+                            className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                            title="回填此历史参数"
+                          >
+                            <Sparkles className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={(e) => handleDelete(rec.run_id, e)}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="删除此档案"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                          <div className="text-gray-400">
+                            {isExpanded ? (
+                              <ChevronUp className="w-4 h-4" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {isExpanded && (
+                      <div className="border-t border-gray-200 p-4 bg-white">
+                        {detailLoading && !currentDetail ? (
+                          <div className="py-8 text-center text-gray-400 text-xs">
+                            <RefreshCw className="w-5 h-5 animate-spin mx-auto text-indigo-500 mb-2" />
+                            加载详情明细中...
+                          </div>
+                        ) : currentDetail ? (
+                          <div className="space-y-4">
+                            <div className="p-3 bg-gray-50 rounded-lg text-xs text-gray-600 font-mono">
+                              <div>档案 ID: {rec.run_id}</div>
+                              <div>
+                                价格基准: ¥{currentDetail.summary?.history_meta?.backtest_base_price} | 
+                                起止日期: {currentDetail.summary?.start_date} ~ {currentDetail.summary?.end_date}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-center text-gray-400 py-4 text-xs">
+                            无明细数据
+                          </div>
                         )}
                       </div>
-                      <div className="flex items-center gap-4 text-xs text-gray-500 mt-1.5 font-mono">
-                        <span>测算时间: {formatRecordTime(rec.created_at)}</span>
-                        <span>初始本金: ¥{Number(rec.total_capital).toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 核心 KPI 指标 */}
-                  <div className="flex items-center gap-6 font-mono text-xs">
-                    <div>
-                      <div className="text-gray-400 text-[11px]">年化收益率</div>
-                      <div className={`font-bold text-sm ${rec.annual_return >= 0 ? "text-red-600" : "text-emerald-600"}`}>
-                        {rec.annual_return >= 0 ? `+${rec.annual_return}%` : `${rec.annual_return}%`}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-gray-400 text-[11px]">做 T 纯利润</div>
-                      <div className="font-bold text-sm text-red-600">
-                        +¥{Number(rec.total_profit).toLocaleString()}
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-gray-400 text-[11px]">最大回撤</div>
-                      <div className="font-bold text-sm text-emerald-700">
-                        -{rec.max_drawdown}%
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-gray-400 text-[11px]">成交笔数</div>
-                      <div className="font-bold text-sm text-gray-800">
-                        {rec.total_trades} 笔
-                      </div>
-                    </div>
-
-                    {/* 操作按钮 */}
-                    <div className="flex items-center gap-2 pl-3 border-l border-gray-200">
-                      <button
-                        type="button"
-                        onClick={(e) => handleApplyParams(rec, e)}
-                        className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold transition-colors shadow-2xs"
-                        title="将此档案的资金量与步长配置回填至策略回测面板"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                        回填参数
-                      </button>
-                      <button
-                        type="button"
-                        onClick={(e) => handleDelete(rec.run_id, e)}
-                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                        title="删除该记录"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        type="button"
-                        className="p-1.5 rounded-lg text-gray-500 hover:text-indigo-600 transition-colors"
-                      >
-                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 展开的快照详情（净值走势与全量流水） */}
-                {isExpanded && (
-                  <div className="p-5 border-t border-gray-100 bg-white space-y-4">
-                    {detailLoading && !currentDetail ? (
-                      <div className="py-8 text-center text-xs text-gray-400">
-                        <RefreshCw className="w-5 h-5 animate-spin mx-auto text-indigo-500 mb-1" />
-                        正在从本机 MySQL 还原回测快照...
-                      </div>
-                    ) : (
-                      <>
-                        {/* 流水筛选控制 */}
-                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gray-50/80 p-3 rounded-xl border border-gray-100">
-                          <div className="flex items-center gap-1.5 text-xs">
-                            <span className="text-gray-500 font-medium mr-1 flex items-center gap-1">
-                              <Filter className="w-3.5 h-3.5" /> 轨道筛选:
-                            </span>
-                            {[
-                              { id: "all", label: `全部 (${activeTrades.length})` },
-                              { id: "small", label: `小网 (${activeTrades.filter((t) => t.rail === "small").length})` },
-                              { id: "medium", label: `中网 (${activeTrades.filter((t) => t.rail === "medium").length})` },
-                              { id: "large", label: `大网 (${activeTrades.filter((t) => t.rail === "large").length})` },
-                            ].map((rail) => (
-                              <button
-                                key={rail.id}
-                                type="button"
-                                onClick={() => {
-                                  setDetailRail(rail.id);
-                                  setCurrentPage(1);
-                                }}
-                                className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
-                                  detailRail === rail.id
-                                    ? "bg-white text-indigo-700 font-bold shadow-xs border border-gray-200"
-                                    : "text-gray-600 hover:text-gray-900"
-                                }`}
-                              >
-                                {rail.label}
-                              </button>
-                            ))}
-                          </div>
-
-                          <div className="flex items-center gap-2 text-xs">
-                            <select
-                              value={pageSize}
-                              onChange={(e) => {
-                                setPageSize(Number(e.target.value));
-                                setCurrentPage(1);
-                              }}
-                              className="px-2 py-1 bg-white border border-gray-200 rounded-lg text-gray-700 text-xs"
-                            >
-                              <option value={20}>每页 20 笔</option>
-                              <option value={50}>每页 50 笔</option>
-                              <option value={100}>每页 100 笔</option>
-                            </select>
-
-                            <button
-                              type="button"
-                              onClick={() => handleExportCsv(rec)}
-                              className="inline-flex items-center gap-1 px-3 py-1 bg-white border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-100 transition-colors shadow-2xs"
-                            >
-                              <Download className="w-3.5 h-3.5 text-gray-600" />
-                              导出 CSV
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* 流水表格 */}
-                        <div className="overflow-x-auto max-h-72 border border-gray-200 rounded-lg">
-                          <table className="w-full text-left text-xs border-collapse font-mono">
-                            <thead className="bg-gray-50/90 sticky top-0 border-b border-gray-200 text-gray-500">
-                              <tr>
-                                <th className="py-2.5 px-4 font-semibold">成交时间</th>
-                                <th className="py-2.5 px-4 font-semibold">动作</th>
-                                <th className="py-2.5 px-4 font-semibold">轨道</th>
-                                <th className="py-2.5 px-4 font-semibold">成交价格</th>
-                                <th className="py-2.5 px-4 font-semibold">股数</th>
-                                <th className="py-2.5 px-4 font-semibold">成交金额</th>
-                                <th className="py-2.5 px-4 font-semibold">手续费</th>
-                                <th className="py-2.5 px-4 font-semibold">落袋净利</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                              {paginatedTrades.length === 0 ? (
-                                <tr>
-                                  <td colSpan={8} className="py-6 text-center text-gray-400">
-                                    暂无成交明细
-                                  </td>
-                                </tr>
-                              ) : (
-                                paginatedTrades.map((t, idx) => (
-                                  <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                                    <td className="py-2 px-4 text-gray-500">{t.trade_time}</td>
-                                    <td className="py-2 px-4">
-                                      <span
-                                        className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-bold font-sans ${
-                                          t.action === "SELL"
-                                            ? "bg-red-100 text-red-800"
-                                            : "bg-emerald-100 text-emerald-800"
-                                        }`}
-                                      >
-                                        {t.action === "SELL" ? (
-                                          <ArrowUpRight className="w-3 h-3" />
-                                        ) : (
-                                          <ArrowDownRight className="w-3 h-3" />
-                                        )}
-                                        {t.action_label || (t.action === "SELL" ? "卖出" : "买入")}
-                                      </span>
-                                    </td>
-                                    <td className="py-2 px-4">
-                                      <span className="text-gray-700 font-sans font-medium">{t.rail_name || t.rail}</span>
-                                    </td>
-                                    <td className="py-2 px-4 font-bold text-gray-900">¥{Number(t.price).toFixed(3)}</td>
-                                    <td className="py-2 px-4">{t.shares?.toLocaleString()} 股</td>
-                                    <td className="py-2 px-4">¥{t.amount?.toLocaleString()}</td>
-                                    <td className="py-2 px-4 text-gray-400">¥{t.fee}</td>
-                                    <td className="py-2 px-4 font-bold text-red-600 font-sans">
-                                      {t.action === "SELL" ? `+¥${t.profit}` : "-"}
-                                    </td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* 分页控制栏 */}
-                        <div className="flex items-center justify-between text-xs text-gray-500 pt-1 font-mono">
-                          <div>
-                            显示第 {(currentPage - 1) * pageSize + 1} -{" "}
-                            {Math.min(currentPage * pageSize, filteredTrades.length)} 笔，共 {filteredTrades.length} 笔
-                          </div>
-                          <div className="flex items-center gap-2 font-sans">
-                            <button
-                              type="button"
-                              disabled={currentPage <= 1}
-                              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                              className="px-2.5 py-1 rounded border border-gray-200 bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 font-medium"
-                            >
-                              上一页
-                            </button>
-                            <span className="font-mono">
-                              {currentPage} / {totalPages}
-                            </span>
-                            <button
-                              type="button"
-                              disabled={currentPage >= totalPages}
-                              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                              className="px-2.5 py-1 rounded border border-gray-200 bg-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-gray-50 font-medium"
-                            >
-                              下一页
-                            </button>
-                          </div>
-                        </div>
-                      </>
                     )}
                   </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -2,11 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CARD_RENDER_LIMIT,
+  DEFAULT_COLLAPSE_LIMIT,
   PRIMARY_SECTORS,
   buildTruncationLabel,
   filterByStoredSubsector,
   subsectorsForSector,
+  aggregateSectorCounts,
 } from "./radarDisplay.js";
+
+test("default collapse limit is 6 items", () => {
+  assert.equal(DEFAULT_COLLAPSE_LIMIT, 6);
+});
 
 test("primary capsules do not include 其他主题", () => {
   assert.equal(PRIMARY_SECTORS.includes("其他主题"), false);
@@ -41,3 +47,17 @@ test("subsector counts come from the catalog, including zeros", () => {
     [1, 0]
   );
 });
+
+test("aggregateSectorCounts dynamically computes counts matching mature pool", () => {
+  const items = [
+    { name: "煤炭ETF", sector: "周期资源" },
+    { name: "有色金属ETF", sector: "周期资源" },
+    { name: "半导体ETF", sector: "科技芯片" },
+  ];
+  const map = aggregateSectorCounts(items);
+  assert.equal(map["周期资源"], 2);
+  assert.equal(map["科技芯片"], 1);
+  assert.equal(map["医药健康"], undefined);
+  assert.equal(Object.values(map).reduce((a, b) => a + b, 0), items.length);
+});
+

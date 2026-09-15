@@ -19,8 +19,56 @@ import {
   Filter,
   Layers,
   Target,
+  Info,
 } from "lucide-react";
 import { isAbortError, runBacktest } from "@shared/services/api";
+
+function calculateProfitAttribution(summary, profitPool) {
+  if (!summary) return null;
+  const initialCapital = Number(summary.initial_capital) || 0;
+  const finalEquity = Number(summary.final_equity) || 0;
+  const totalProfit = Number((finalEquity - initialCapital).toFixed(2));
+
+  const pool = profitPool || summary.profit_pool;
+  const gridProfit = Number((summary.grid_cash_profit ?? pool?.total_profit_accumulated ?? 0).toFixed(2));
+  const poolRemainder = Number((pool?.profit_pool_remainder ?? 0).toFixed(2));
+  const costSpent = Number(Math.max(0, gridProfit - poolRemainder).toFixed(2));
+  const freeSharesValue = Number((pool?.free_shares_value ?? 0).toFixed(2));
+  const freeSharesGain = Number((freeSharesValue - costSpent).toFixed(2));
+
+  // 底仓高抛变现溢价及未卖完底仓余值 (严密平账: totalProfit = gridProfit + freeSharesGain + basePositionGain)
+  const basePositionGain = Number((totalProfit - gridProfit - freeSharesGain).toFixed(2));
+
+  // 比例条安全百分比计算 (防止除以 0、负数宽度以及确保三者相加为 100%)
+  let gridPct = 0;
+  let freeSharesPct = 0;
+  let basePct = 0;
+
+  if (totalProfit > 0) {
+    const posTotal = Math.max(0, gridProfit) + Math.max(0, freeSharesGain) + Math.max(0, basePositionGain);
+    if (posTotal > 0) {
+      gridPct = Number(((Math.max(0, gridProfit) / posTotal) * 100).toFixed(1));
+      freeSharesPct = Number(((Math.max(0, freeSharesGain) / posTotal) * 100).toFixed(1));
+      basePct = Number(Math.max(0, 100 - gridPct - freeSharesPct).toFixed(1));
+    }
+  }
+
+  return {
+    initialCapital,
+    finalEquity,
+    totalProfit,
+    gridProfit,
+    costSpent,
+    poolRemainder,
+    freeShares: pool?.free_shares || 0,
+    freeSharesValue,
+    freeSharesGain,
+    basePositionGain,
+    gridPct,
+    freeSharesPct,
+    basePct,
+  };
+}
 
 const BacktestCard = ({
   etfCode,
@@ -93,6 +141,10 @@ const BacktestCard = ({
   const railAttribution = backtestData?.rail_attribution || [];
   const equityCurve = backtestData?.equity_curve || [];
   const allTrades = backtestData?.total_trades_all || backtestData?.recent_trades || [];
+
+  const profitAttribution = useMemo(() => {
+    return calculateProfitAttribution(summary, profitPool);
+  }, [summary, profitPool]);
 
   // 分轨过滤
   const filteredTrades = useMemo(() => {
@@ -381,25 +433,54 @@ const BacktestCard = ({
         </div>
       )}
 
-      {!loading && !error && summary && (
+      {!loading && !error && summary && (() => {
+        const calDays = summary?.history_meta?.actual_calendar_days || (summary?.backtest_days ? Math.round(summary.backtest_days * 1.45) : 365);
+        const annualizedReturn = summary?.annualized_return != null 
+          ? summary.annualized_return 
+          : (summary?.strategy_return != null && calDays > 0 
+              ? Number((summary.strategy_return * (365.0 / calDays)).toFixed(2)) 
+              : 0);
+
+        return (
         <>
-          {/* 1. 核心战绩 KPI 跑道 */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {/* 策略收益 */}
+          {/* 1. 核心战绩 KPI 跑道 (5 格对齐设计) */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            {/* 1. 策略累计总收益率 */}
             <div className="p-4 rounded-xl bg-gradient-to-br from-blue-50/80 to-white border border-blue-100">
               <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
-                <span>策略累计总收益率</span>
+                <span className="flex items-center gap-1.5">
+                  <span>策略累计总收益率</span>
+                  {(summary?.reinvest_mode || reinvestMode) === "pool_shares" && (
+                    <span className="text-[10px] text-indigo-700 bg-indigo-100 px-1.5 py-0.2 rounded font-sans font-medium">
+                      留利润
+                    </span>
+                  )}
+                </span>
                 <Sparkles className="w-3.5 h-3.5 text-blue-600" />
               </div>
               <div className={`text-2xl font-black font-mono ${summary.strategy_return >= 0 ? "text-red-600" : "text-green-600"}`}>
                 {summary.strategy_return >= 0 ? `+${summary.strategy_return}%` : `${summary.strategy_return}%`}
               </div>
-              <div className="text-[11px] text-gray-500 mt-1 font-mono">
-                期末总资产: ¥{summary.final_equity?.toLocaleString()}
+              <div className="text-[11px] text-gray-500 mt-1 font-mono truncate" title={`期末总资产: ¥${summary.final_equity?.toLocaleString()}`}>
+                期末资产: ¥{summary.final_equity?.toLocaleString()}
               </div>
             </div>
 
-            {/* 标的基准收益 */}
+            {/* 2. 策略折算年化收益率 (新增！与多周期天梯大宽表 100% 对齐) */}
+            <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-50/80 to-white border border-indigo-100">
+              <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
+                <span>策略折算年化收益率</span>
+                <TrendingUp className="w-3.5 h-3.5 text-indigo-600" />
+              </div>
+              <div className={`text-2xl font-black font-mono ${annualizedReturn >= 0 ? "text-red-600" : "text-green-600"}`}>
+                {annualizedReturn >= 0 ? `+${annualizedReturn}%` : `${annualizedReturn}%`}
+              </div>
+              <div className="text-[11px] text-indigo-600 mt-1 font-medium truncate">
+                跨度: {summary.backtest_days}交易日 ({calDays}天)
+              </div>
+            </div>
+
+            {/* 3. 标的基准收益 */}
             <div className="p-4 rounded-xl bg-gradient-to-br from-gray-50 to-white border border-gray-200">
               <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
                 <span>标的持有同期涨跌</span>
@@ -408,12 +489,12 @@ const BacktestCard = ({
               <div className={`text-2xl font-black font-mono ${summary.benchmark_return >= 0 ? "text-red-600" : "text-green-600"}`}>
                 {summary.benchmark_return >= 0 ? `+${summary.benchmark_return}%` : `${summary.benchmark_return}%`}
               </div>
-              <div className="text-[11px] text-gray-500 mt-1">
-                基准对照（买入并持有）
+              <div className="text-[11px] text-gray-500 mt-1 truncate">
+                买入并持有基准对照
               </div>
             </div>
 
-            {/* 跑赢超额 (Alpha) */}
+            {/* 4. 跑赢超额 (Alpha) */}
             <div className="p-4 rounded-xl bg-gradient-to-br from-emerald-50/80 to-white border border-emerald-100">
               <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
                 <span>跑赢标的超额 (Alpha)</span>
@@ -422,12 +503,12 @@ const BacktestCard = ({
               <div className={`text-2xl font-black font-mono ${summary.alpha >= 0 ? "text-emerald-700" : "text-gray-700"}`}>
                 {summary.alpha >= 0 ? `+${summary.alpha}%` : `${summary.alpha}%`}
               </div>
-              <div className="text-[11px] text-emerald-700 mt-1 font-medium">
-                网格纯做T利润: +¥{summary.grid_cash_profit?.toLocaleString()}
+              <div className="text-[11px] text-emerald-700 mt-1 font-medium truncate" title={`纯做T利润: +¥${summary.grid_cash_profit?.toLocaleString()}`}>
+                做T利润: +¥{summary.grid_cash_profit?.toLocaleString()}
               </div>
             </div>
 
-            {/* 胜率与风控 */}
+            {/* 5. 胜率与风控 */}
             <div className="p-4 rounded-xl bg-gradient-to-br from-purple-50/80 to-white border border-purple-100">
               <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
                 <span>做T胜率 / 最大回撤</span>
@@ -439,11 +520,136 @@ const BacktestCard = ({
                 </span>
                 <span className="text-xs text-gray-500 font-mono">回撤 {summary.max_drawdown}%</span>
               </div>
-              <div className="text-[11px] text-gray-500 mt-1">
-                总成交 {summary.total_trades_count} 笔 (买{summary.buy_trades_count}/卖{summary.sell_trades_count}) · 佣金¥{summary.total_commission}
+              <div className="text-[11px] text-gray-500 mt-1 truncate" title={`总成交 ${summary.total_trades_count} 笔 (买${summary.buy_trades_count}/卖${summary.sell_trades_count})`}>
+                总成交 {summary.total_trades_count} 笔
               </div>
             </div>
           </div>
+
+          {/* 留利润模式专属：收益穿透桥梁与归因分解 (做T造血 ➔ 滚存股本 ➔ 享受主升浪) */}
+          {profitAttribution && (summary?.reinvest_mode || reinvestMode) === "pool_shares" && (
+            <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-indigo-50/80 via-blue-50/40 to-white border border-indigo-200 shadow-2xs space-y-3.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-indigo-600 rounded-lg text-white">
+                    <Layers className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                      <span>留利润模式收益穿透全景 (资金全链路平账)</span>
+                      <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full font-mono font-bold">
+                        对账闭环 100%
+                      </span>
+                    </h4>
+                  </div>
+                </div>
+                <div className="text-xs text-gray-600 font-mono">
+                  本金 ¥{profitAttribution.initialCapital.toLocaleString()} ➔ 期末总资产{" "}
+                  <span className="font-bold text-indigo-950">¥{profitAttribution.finalEquity.toLocaleString()}</span>{" "}
+                  (净利{" "}
+                  <span className={`font-bold ${profitAttribution.totalProfit >= 0 ? "text-red-600" : "text-green-700"}`}>
+                    {profitAttribution.totalProfit >= 0 ? `+¥${profitAttribution.totalProfit.toLocaleString()}` : `-¥${Math.abs(profitAttribution.totalProfit).toLocaleString()}`}
+                  </span>
+                  )
+                </div>
+              </div>
+
+              {/* 三大资金归因分解卡片 */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                {/* 1. 做T价差本金 */}
+                <div className="bg-white/95 p-3.5 rounded-xl border border-blue-200/90 shadow-xs">
+                  <div className="flex items-center justify-between text-gray-500 mb-1">
+                    <span className="flex items-center gap-1.5 font-bold text-blue-900">
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block"></span>
+                      ① 网格做T落袋净利
+                    </span>
+                    <span className="font-mono font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
+                      {profitAttribution.gridPct}% 贡献
+                    </span>
+                  </div>
+                  <div className="text-xl font-black font-mono text-blue-700 mt-1">
+                    +¥{profitAttribution.gridProfit.toLocaleString()}
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+                    流水做T累积纯价差，已 100% 汇入蓄水池充当购股成本 (池内零钱 ¥{profitAttribution.poolRemainder})
+                  </div>
+                </div>
+
+                {/* 2. 免费份额牛市浮盈 */}
+                <div className="bg-white/95 p-3.5 rounded-xl border border-purple-200/90 shadow-xs">
+                  <div className="flex items-center justify-between text-gray-500 mb-1">
+                    <span className="flex items-center gap-1.5 font-bold text-purple-900">
+                      <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block"></span>
+                      ② 免费份额持仓浮盈
+                    </span>
+                    <span className="font-mono font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded">
+                      {profitAttribution.freeSharesPct}% 贡献
+                    </span>
+                  </div>
+                  <div className="text-xl font-black font-mono text-purple-700 mt-1">
+                    {profitAttribution.freeSharesGain >= 0 ? `+¥${profitAttribution.freeSharesGain.toLocaleString()}` : `-¥${Math.abs(profitAttribution.freeSharesGain).toLocaleString()}`}
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+                    {profitAttribution.freeShares.toLocaleString()} 股免费份额随标的大涨增值至现值 ¥{profitAttribution.freeSharesValue.toLocaleString()}，享受长牛复利
+                  </div>
+                </div>
+
+                {/* 3. 底仓高抛变现溢价 */}
+                <div className="bg-white/95 p-3.5 rounded-xl border border-emerald-200/90 shadow-xs">
+                  <div className="flex items-center justify-between text-gray-500 mb-1">
+                    <span className="flex items-center gap-1.5 font-bold text-emerald-900">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+                      ③ 底仓高抛变现与余值
+                    </span>
+                    <span className="font-mono font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
+                      {profitAttribution.basePct}% 贡献
+                    </span>
+                  </div>
+                  <div className="text-xl font-black font-mono text-emerald-700 mt-1">
+                    {profitAttribution.basePositionGain >= 0 ? `+¥${profitAttribution.basePositionGain.toLocaleString()}` : `-¥${Math.abs(profitAttribution.basePositionGain).toLocaleString()}`}
+                  </div>
+                  <div className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+                    开网 50% 底仓高位分批止盈回流现金，以及期末未平仓余股现值
+                  </div>
+                </div>
+              </div>
+
+              {/* 堆叠比例分布条 */}
+              <div className="space-y-1.5 pt-1">
+                <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden flex shadow-inner border border-gray-200/50">
+                  <div
+                    style={{ width: `${profitAttribution.gridPct}%` }}
+                    className="bg-blue-500 transition-all hover:opacity-90"
+                    title={`做T价差本金贡献: ${profitAttribution.gridPct}%`}
+                  />
+                  <div
+                    style={{ width: `${profitAttribution.freeSharesPct}%` }}
+                    className="bg-purple-500 transition-all hover:opacity-90"
+                    title={`免费份额持仓浮盈贡献: ${profitAttribution.freeSharesPct}%`}
+                  />
+                  <div
+                    style={{ width: `${profitAttribution.basePct}%` }}
+                    className="bg-emerald-500 transition-all hover:opacity-90"
+                    title={`底仓高抛变现与余值贡献: ${profitAttribution.basePct}%`}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[11px] text-gray-500 font-mono px-1">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-blue-500 inline-block"></span>
+                    做T差价初始积累: {profitAttribution.gridPct}%
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-purple-500 inline-block"></span>
+                    牛市持股浮盈: {profitAttribution.freeSharesPct}%
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                    底仓变现: {profitAttribution.basePct}%
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* 模式 B 专属：0 成本免费份额沉淀库卡片 */}
           {profitPool?.enabled && (
@@ -775,6 +981,17 @@ const BacktestCard = ({
                   </div>
                 </div>
 
+                {/* 模式 B 专属：交易流水与留利润对账联动提示 */}
+                {(summary?.reinvest_mode || reinvestMode) === "pool_shares" && (
+                  <div className="flex items-start sm:items-center gap-2 px-3.5 py-2.5 rounded-lg bg-amber-50/90 border border-amber-200/80 text-xs text-amber-900">
+                    <Info className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+                    <div className="leading-relaxed">
+                      <span className="font-bold">流水对账说明：</span>
+                      当前启用了【留利润模式】，此处交易流水明细所列“落袋净利”为纯网格做 T 的<strong>价差收益</strong>（全轨做T净利累计 +¥{summary?.grid_cash_profit || summary?.profit_pool?.total_profit_accumulated || "0.00"}）。该笔利润已 100% 汇入蓄水池购入 {profitPool?.free_shares?.toLocaleString() || 0} 股免费份额（期末现值 ¥{profitPool?.free_shares_value?.toLocaleString() || "0.00"}），产生的持仓浮盈已全部计入顶部总资产与策略总收益率中。
+                    </div>
+                  </div>
+                )}
+
                 {/* 交易流水表格 */}
                 <div className="overflow-x-auto max-h-80 border border-gray-200 rounded-lg">
                   <table className="w-full text-left text-xs border-collapse font-mono">
@@ -866,7 +1083,8 @@ const BacktestCard = ({
             )}
           </div>
         </>
-      )}
+        );
+      })()}
     </div>
   );
 };

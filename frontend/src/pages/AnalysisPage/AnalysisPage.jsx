@@ -166,6 +166,27 @@ const AnalysisPage = () => {
     }
   };
 
+  // 处理从档案库或大宽表回填策略参数
+  const handleApplyArchiveParams = (newParams, record) => {
+    const targetCode = newParams?.etfCode || record?.etf_code;
+    if (targetCode && targetCode !== etfCode) {
+      // 跨标的：通过 navigate 切换到目标标的分析页面
+      const fullParams = {
+        ...currentParams,
+        ...newParams,
+        etfCode: targetCode,
+      };
+      navigate(generateAnalysisURL(targetCode, fullParams));
+    } else {
+      // 同标的：更新参数并直接重新分析
+      handleParameterChange(newParams);
+      handleAnalysis({
+        ...currentParams,
+        ...newParams,
+      });
+    }
+  };
+
   // 分享功能
   const handleShare = async () => {
     const shareData = {
@@ -351,6 +372,7 @@ const AnalysisPage = () => {
             backtestParams={currentParams}
             onBackToInput={handleBackToHome}
             onReAnalysis={handleReAnalysis}
+            onApplyArchiveParams={handleApplyArchiveParams}
             showShareButton={true}
           />
         )}

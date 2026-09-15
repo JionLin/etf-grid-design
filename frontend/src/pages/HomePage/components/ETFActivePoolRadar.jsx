@@ -2,10 +2,12 @@ import React, { useState, useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
   CARD_RENDER_LIMIT,
+  DEFAULT_COLLAPSE_LIMIT,
   PRIMARY_SECTORS,
   buildTruncationLabel,
   filterByStoredSubsector,
   subsectorsForSector,
+  aggregateSectorCounts,
 } from "./radarDisplay";
 
 export default function ETFActivePoolRadar({ onSelectETF }) {
@@ -23,19 +25,22 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
   const [searchKeyword, setSearchKeyword] = useState("");
   const [showUnclassified, setShowUnclassified] = useState(false);
   const [unclassifiedItems, setUnclassifiedItems] = useState([]);
+  const [maturityFilter, setMaturityFilter] = useState("5y"); // 默认展示满 5 年期 (历经完整牛熊)
+  const [isExpanded, setIsExpanded] = useState(false); // 默认收拢，仅展示前 6 只精选
 
-  // 当一级分类变更时，重置二级分类为“全部”
+  // 当一级分类变更时，重置二级分类为“全部”且重置展开状态
   const handlePrimarySectorChange = (sector) => {
     setSelectedSector(sector);
     setSelectedSubSector("全部");
+    setIsExpanded(false);
   };
 
-  // 加载全市场做 T 标的池
+  // 加载全市场做 T 标的池 (首屏拉取全量，后续所有成熟度/赛道/弹性/搜索切片纯本地 0ms 纯函数响应)
   useEffect(() => {
     const controller = new AbortController();
     fetchPoolData(controller.signal);
     return () => controller.abort();
-  }, [selectedSector, selectedSubSector, onlyT0, selectedElasticity]);
+  }, []);
 
   const fetchUnclassified = async (signal) => {
     try {
@@ -59,11 +64,6 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (selectedSector !== "全部") params.append("sector", selectedSector);
-      if (onlyT0) params.append("is_t0", "true");
-      if (selectedElasticity !== "全部")
-        params.append("elasticity", selectedElasticity);
-      if (selectedSubSector !== "全部") params.append("subsector", selectedSubSector);
       params.append("min_ma20_amount", "3000");
       params.append("min_atr", "1.5");
 
@@ -81,32 +81,87 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     }
   };
 
-  // 建立一级赛道数量映射
-  const sectorCountMap = useMemo(() => {
-    const map = {};
-    (poolData.sectors_summary || []).forEach((s) => {
-      map[s.name] = s.count;
-    });
-    return map;
-  }, [poolData.sectors_summary]);
+  // 1. 第一级派生：基于当前上市成熟度过滤的基准标的池 (5年: 256只 | 3年: 358只 | 全量: 537只)
+  const maturePoolItems = useMemo(() => {
+    const rawItems = poolData.items || [];
+    if (maturityFilter === "5y") {
+      return rawItems.filter((item) => item.is_valid_5y);
+    }
+    if (maturityFilter === "3y") {
+      return rawItems.filter((item) => item.is_valid_3y);
+    }
+    return rawItems;
+  }, [poolData.items, maturityFilter]);
 
-  // 当前一级赛道下的二级细分列表配置
+  // 成熟度胶囊对应的自适应计数
+  const maturity5yCount = useMemo(() => {
+    const list = poolData.items || [];
+    return list.filter((it) => it.is_valid_5y).length || poolData.valid_5y_total || 256;
+  }, [poolData.items, poolData.valid_5y_total]);
+
+  const maturity3yCount = useMemo(() => {
+    const list = poolData.items || [];
+    return list.filter((it) => it.is_valid_3y).length || poolData.valid_3y_total || 358;
+  }, [poolData.items, poolData.valid_3y_total]);
+
+  const maturityAllCount = useMemo(() => {
+    const list = poolData.items || [];
+    return list.length || poolData.total || 537;
+  }, [poolData.items, poolData.total]);
+
+  // 当前成熟度基准池总数与 T+0 动态计数
+  const currentMaturityTotal = maturePoolItems.length;
+  const currentT0Count = useMemo(() => {
+    return maturePoolItems.filter((item) => item.is_t0).length;
+  }, [maturePoolItems]);
+
+  // 2. 基于当前成熟度基准池动态自适应聚合赛道徽标数字 (相加严格等于当前成熟池总数)
+  const sectorCountMap = useMemo(() => aggregateSectorCounts(maturePoolItems), [maturePoolItems]);
+
+  // 3. 当前一级赛道下的二级细分列表配置 (动态自适应)
   const currentSubSectors = useMemo(() => {
     if (selectedSector === "全部") {
       return [];
     }
-    const subs = subsectorsForSector(poolData.subsectors_summary, selectedSector);
+    const subMap = {};
+    maturePoolItems
+      .filter((item) => item.sector === selectedSector)
+      .forEach((item) => {
+        const sub = item.subsector || "其他";
+        subMap[sub] = (subMap[sub] || 0) + 1;
+      });
+
+    const subs = Object.entries(subMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, count]) => ({ name, count }));
+
     const sectorCount = sectorCountMap[selectedSector] ?? 0;
     return [{ name: "全部", count: sectorCount }, ...subs];
-  }, [selectedSector, poolData.subsectors_summary, sectorCountMap]);
+  }, [selectedSector, maturePoolItems, sectorCountMap]);
 
-  // 客户端过滤：二级分类 + 搜索关键字
+  // 4. 第二级派生：赛道 + 二级分类 + 交易机制 + 弹性 + 搜索关键字级联过滤
   const filteredItems = useMemo(() => {
-    let result = poolData.items || [];
+    let result = maturePoolItems;
 
+    // 赛道过滤
+    if (selectedSector !== "全部") {
+      result = result.filter((item) => item.sector === selectedSector);
+    }
+
+    // 二级分类过滤
     result = filterByStoredSubsector(result, selectedSubSector);
 
-    // 2. 搜索关键字过滤
+    // T+0 过滤
+    if (onlyT0) {
+      result = result.filter((item) => item.is_t0);
+    }
+
+    // ATR 弹性过滤
+    if (selectedElasticity !== "全部") {
+      result = result.filter((item) => item.elasticity === selectedElasticity);
+    }
+
+    // 搜索关键字过滤
     if (searchKeyword.trim()) {
       const kw = searchKeyword.trim().toLowerCase();
       result = result.filter(
@@ -117,12 +172,23 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     }
 
     return result;
-  }, [poolData.items, selectedSector, selectedSubSector, searchKeyword]);
+  }, [
+    maturePoolItems,
+    selectedSector,
+    selectedSubSector,
+    onlyT0,
+    selectedElasticity,
+    searchKeyword,
+  ]);
 
-  const renderedItems = filteredItems.slice(0, CARD_RENDER_LIMIT);
+  const isSearching = Boolean(searchKeyword.trim());
+  const shouldShowAll = isSearching || isExpanded;
+  const visibleLimit = shouldShowAll ? CARD_RENDER_LIMIT : DEFAULT_COLLAPSE_LIMIT;
+  const renderedItems = filteredItems.slice(0, visibleLimit);
+  const hiddenCount = Math.max(0, filteredItems.length - renderedItems.length);
   const sectorHitCount =
     selectedSector === "全部"
-      ? poolData.total || 0
+      ? currentMaturityTotal
       : sectorCountMap[selectedSector] ?? filteredItems.length;
   const selectedSubCount = currentSubSectors.find((item) => item.name === selectedSubSector)?.count;
   const usesClientFilter = Boolean(searchKeyword.trim());
@@ -131,7 +197,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
     : selectedSubSector !== "全部"
       ? selectedSubCount ?? filteredItems.length
       : sectorHitCount;
-  const truncationLabel = buildTruncationLabel(hitCount, renderedItems.length);
+  const truncationLabel = buildTruncationLabel(hitCount, shouldShowAll ? renderedItems.length : filteredItems.length);
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 p-6 sm:p-8 space-y-6">
@@ -174,6 +240,76 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
         </div>
       </div>
 
+      {/* 核心成熟度梯队切换：默认展示历经 5 年牛熊标的 */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 p-2.5 bg-slate-50/80 dark:bg-slate-800/60 rounded-xl border border-slate-200/80 dark:border-slate-700/60">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+            <span>🛡️</span>
+            <span>上市成熟度:</span>
+          </span>
+          <div className="inline-flex rounded-lg bg-slate-200/80 dark:bg-slate-700/80 p-0.5 text-xs font-semibold">
+            <button
+              type="button"
+              onClick={() => {
+                setMaturityFilter("5y");
+                setIsExpanded(false);
+              }}
+              className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
+                maturityFilter === "5y"
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm font-bold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+              }`}
+            >
+              <span>★ 历经5年牛熊</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-mono">
+                {maturity5yCount}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMaturityFilter("3y");
+                setIsExpanded(false);
+              }}
+              className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
+                maturityFilter === "3y"
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm font-bold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+              }`}
+            >
+              <span>满3年成熟</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-300/80 dark:bg-slate-600 text-slate-700 dark:text-slate-300 font-mono">
+                {maturity3yCount}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMaturityFilter("all");
+                setIsExpanded(false);
+              }}
+              className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
+                maturityFilter === "all"
+                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm font-bold"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
+              }`}
+            >
+              <span>全量活跃池</span>
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-300/80 dark:bg-slate-600 text-slate-700 dark:text-slate-300 font-mono">
+                {maturityAllCount}
+              </span>
+            </button>
+          </div>
+        </div>
+        <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
+          {maturityFilter === "5y"
+            ? "已精选历经完整牛熊大考的元老标的，历史回测扎实"
+            : maturityFilter === "3y"
+            ? "涵盖满3年的高流动细分ETF，兼顾弹性与周期稳定性"
+            : "全市场537只高流动做T标的全景，含近两年上市的高弹性次新"}
+        </span>
+      </div>
+
       {/* 第一层：8 大产业链赛道胶囊切换 (带动态真实总数) */}
       <div className="space-y-2.5">
         <div className="flex items-center justify-between">
@@ -181,7 +317,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
             产业与资产赛道 (互斥主分类)
           </span>
           <span className="text-xs font-semibold text-gray-400">
-            共精选出 {poolData.total || 0} 只成熟标的
+            共精选出 {currentMaturityTotal} 只成熟标的
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -189,7 +325,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
             const isSelected = selectedSector === sector;
             const count =
               sector === "全部"
-                ? poolData.total || 0
+                ? currentMaturityTotal
                 : sectorCountMap[sector] ?? 0;
 
             return (
@@ -269,7 +405,7 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
             }`}
           >
             <span>⚡</span>
-            <span>仅看日内 T+0 ({poolData.t0_total || 0}只)</span>
+            <span>仅看日内 T+0 ({currentT0Count}只)</span>
           </button>
         </div>
 
@@ -427,6 +563,32 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
             );
           })}
         </div>
+
+        {/* 底部渐进式展开 / 收起控制条 */}
+        {!isSearching && filteredItems.length > DEFAULT_COLLAPSE_LIMIT && (
+          <div className="pt-2 flex flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-gray-700 dark:to-gray-750 hover:from-blue-100 hover:to-indigo-100 text-blue-700 dark:text-blue-300 font-bold text-xs rounded-xl border border-blue-200/80 dark:border-gray-600 shadow-2xs hover:shadow-xs transition-all flex items-center justify-center gap-2 group cursor-pointer"
+            >
+              {isExpanded ? (
+                <>
+                  <span>收起标的列表 (回到前 6 只精选)</span>
+                  <span className="text-sm transition-transform group-hover:-translate-y-0.5">▴</span>
+                </>
+              ) : (
+                <>
+                  <span>展开当前分类其余标的 (共 {filteredItems.length} 只，{hiddenCount} 只已收拢)</span>
+                  <span className="text-sm transition-transform group-hover:translate-y-0.5">▾</span>
+                </>
+              )}
+            </button>
+            <span className="text-[11px] text-gray-400">
+              💡 提示：在上方搜索框直接输入代码或拼音/名称，可自动全显所有匹配标的
+            </span>
+          </div>
+        )}
         </div>
       )}
     </div>

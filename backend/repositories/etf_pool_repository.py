@@ -138,7 +138,7 @@ class ETFPoolRepository:
         min_amount_10k: float = 0.0,
         min_ma20_amount_10k: float = 3000.0,
         min_atr_pct: float = 1.5,
-        limit: int = 200,
+        limit: int = 600,
     ) -> List[Dict[str, Any]]:
         try:
             query, params = self._pool_query(

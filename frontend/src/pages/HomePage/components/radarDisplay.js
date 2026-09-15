@@ -1,4 +1,5 @@
 export const CARD_RENDER_LIMIT = 48;
+export const DEFAULT_COLLAPSE_LIMIT = 6;
 
 export const PRIMARY_SECTORS = [
   "全部",
@@ -32,3 +33,13 @@ export function buildTruncationLabel(hitCount, renderedCount) {
   }
   return `展示前 ${renderedCount} / 共 ${hitCount}`;
 }
+
+export function aggregateSectorCounts(items) {
+  const map = {};
+  (items || []).forEach((item) => {
+    const sec = item.sector || "未归类";
+    map[sec] = (map[sec] || 0) + 1;
+  });
+  return map;
+}
+

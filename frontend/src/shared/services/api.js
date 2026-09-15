@@ -179,6 +179,20 @@ class ApiService {
   async refreshGridFit() {
     return this.post("/grid-fit/refresh", {});
   }
+
+  /**
+   * 获取全市场 537 只成熟 ETF 多周期回测矩阵
+   */
+  async getUniverseBacktestMatrix(params = {}, options = {}) {
+    return this.get("/backtest/matrix", params, options);
+  }
+
+  /**
+   * 获取首页 11 大赛道胜率与收益横评
+   */
+  async getSectorsRanking(params = {}, options = {}) {
+    return this.get("/backtest/sectors-ranking", params, options);
+  }
 }
 
 // 创建单例实例
@@ -205,5 +219,7 @@ export const deleteBacktestRecord = (runId) => apiService.deleteBacktestRecord(r
 export const getBacktestDistinctETFs = (options) => apiService.getBacktestDistinctETFs(options);
 export const getGridFitBoard = (params, options) => apiService.getGridFitBoard(params, options);
 export const refreshGridFit = () => apiService.refreshGridFit();
+export const getUniverseBacktestMatrix = (params, options) => apiService.getUniverseBacktestMatrix(params, options);
+export const getSectorsRanking = (params, options) => apiService.getSectorsRanking(params, options);
 
 export default apiService;

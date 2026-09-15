@@ -119,8 +119,22 @@ class ETFAnalysisService:
             min_amount_10k=min_amount_10k,
             min_ma20_amount_10k=min_ma20_amount_10k,
             min_atr_pct=min_atr_pct,
-            limit=200
+            limit=600
         )
+
+        # 补齐多周期回测大宽表沉淀的真实物理上市成熟度 (is_valid_5y, is_valid_3y, is_valid_1y)
+        try:
+            from repositories.universe_matrix_repository import UniverseMatrixRepository
+            matrix_repo = UniverseMatrixRepository()
+            validity_map = matrix_repo.get_validity_map()
+            for it in items:
+                v = validity_map.get(str(it.get("etf_code", "")), {})
+                it["is_valid_5y"] = v.get("is_valid_5y", False)
+                it["is_valid_3y"] = v.get("is_valid_3y", False)
+                it["is_valid_1y"] = v.get("is_valid_1y", False)
+        except Exception as e:
+            logger.warning(f"补齐标的成熟度标记失败: {e}")
+
         summary = self.akshare_client.pool_repo.get_sectors_summary(
             min_ma20_amount_10k=min_ma20_amount_10k,
             min_atr_pct=min_atr_pct
@@ -128,6 +142,8 @@ class ETFAnalysisService:
         return {
             "total": summary.get("total_count", len(items)),
             "t0_total": summary.get("t0_count", 0),
+            "valid_5y_total": sum(1 for it in items if it.get("is_valid_5y")),
+            "valid_3y_total": sum(1 for it in items if it.get("is_valid_3y")),
             "unclassified_count": summary.get("unclassified_count", 0),
             "sectors_summary": summary.get("sectors", []),
             "subsectors_summary": self.akshare_client.pool_repo.list_subsector_summary(

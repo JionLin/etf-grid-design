@@ -38,6 +38,7 @@ const AnalysisReport = ({
   backtestParams,
   onBackToInput,
   onReAnalysis,
+  onApplyArchiveParams,
 }) => {
   const [activeTab, setActiveTab] = useState("overview");
   const { shareContent } = useShare();
@@ -197,7 +198,12 @@ const AnalysisReport = ({
 
             {activeTab === "archive" && (
               <BacktestArchiveView
-                onApplyParams={() => {
+                onApplyParams={(params, record) => {
+                  if (onApplyArchiveParams) {
+                    onApplyArchiveParams(params, record);
+                  } else if (onReAnalysis && params?.etfCode) {
+                    onReAnalysis(params);
+                  }
                   setActiveTab("backtest");
                 }}
               />

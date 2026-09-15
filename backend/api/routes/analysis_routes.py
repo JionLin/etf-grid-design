@@ -517,3 +517,63 @@ def get_eda_literature():
         current_app.logger.error(f"读取文献失败: {str(e)}")
         return jsonify({'success': False, 'error': f"读取文献失败: {str(e)}"}), 500
 
+
+@analysis_bp.route('/api/backtest/matrix', methods=['GET'])
+def get_universe_backtest_matrix():
+    """获取全市场 537 只成熟 ETF 多周期回测矩阵大宽表 (纯 MySQL 索引直出)"""
+    from repositories.universe_matrix_repository import UniverseMatrixRepository
+    import time
+    try:
+        matrix_repo = UniverseMatrixRepository()
+        sector = request.args.get('sector')
+        search = request.args.get('search') or request.args.get('q')
+        sort_by = request.args.get('sortBy', '5y')
+        sort_order = request.args.get('sortOrder', 'desc')
+        only_valid_5y = request.args.get('onlyValid5y', 'false').lower() in ('1', 'true')
+        config_key = request.args.get('configKey')
+        
+        # 默认取全量供前端自由快速分页与筛选
+        page = int(request.args.get('page', 1))
+        page_size = int(request.args.get('pageSize', 1000))
+
+        res = matrix_repo.query_matrix(
+            sector=sector,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            only_valid_5y=only_valid_5y,
+            config_key=config_key,
+            is_default_only=(config_key is None),
+            page=page,
+            page_size=page_size,
+        )
+
+        sectors = matrix_repo.aggregate_sectors(config_key=config_key, is_default_only=(config_key is None))
+
+        payload = {
+            'updated_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'total_etfs': res['total'],
+            'sectors': sectors,
+            'records': res['records'],
+        }
+        return jsonify({'success': True, 'data': payload})
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"从 MySQL 获取回测矩阵失败: {str(e)}")
+        return jsonify({'success': False, 'error': f"从 MySQL 获取回测矩阵失败: {str(e)}"}), 500
+
+
+@analysis_bp.route('/api/backtest/sectors-ranking', methods=['GET'])
+def get_sectors_ranking():
+    """获取首页 11 大赛道胜率与收益横评矩阵 (纯 MySQL 动态聚合)"""
+    from repositories.universe_matrix_repository import UniverseMatrixRepository
+    try:
+        matrix_repo = UniverseMatrixRepository()
+        config_key = request.args.get('configKey')
+        sectors = matrix_repo.aggregate_sectors(config_key=config_key, is_default_only=(config_key is None))
+        return jsonify({'success': True, 'data': sectors})
+    except Exception as e:
+        from flask import current_app
+        current_app.logger.error(f"从 MySQL 获取赛道横评失败: {str(e)}")
+        return jsonify({'success': False, 'error': f"从 MySQL 获取赛道横评失败: {str(e)}"}), 500
+
