@@ -38,6 +38,13 @@ const GridParametersCard = ({
   showDetailed = false,
   dataQuality,
 }) => {
+  // 挂单视图模式：'ladder' 阶梯挂单清单（推荐）| 'matrix' 方块矩阵
+  const [viewMode, setViewMode] = useState("ladder");
+  // 复合轨道筛选：'all' 全部合并 | 'small' 小网 | 'medium' 中网 | 'large' 大网
+  const [selectedRail, setSelectedRail] = useState("all");
+  // 复制反馈状态
+  const [copiedKey, setCopiedKey] = useState(null);
+
   if (!gridStrategy) return null;
 
   const effectiveTotalCapital = Number(
@@ -60,13 +67,6 @@ const GridParametersCard = ({
     risk_preference,
     calculation_method,
   } = gridStrategy;
-
-  // 挂单视图模式：'ladder' 阶梯挂单清单（推荐）| 'matrix' 方块矩阵
-  const [viewMode, setViewMode] = useState("ladder");
-  // 复合轨道筛选：'all' 全部合并 | 'small' 小网 | 'medium' 中网 | 'large' 大网
-  const [selectedRail, setSelectedRail] = useState("all");
-  // 复制反馈状态
-  const [copiedKey, setCopiedKey] = useState(null);
 
   const ladderItems = gridStrategy?.composite_grid?.merged_ladder || [];
   const sellOrders = ladderItems.filter((item) => item.action === "SELL");

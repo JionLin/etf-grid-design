@@ -14,6 +14,16 @@ import { Helmet } from 'react-helmet-async';
  * @returns {JSX.Element} 包含分析脚本的 Helmet 组件
  */
 export default function CloudflareAnalytics() {
+  // 本地开发或非生产环境直接不挂载分析脚本，避免 CORS 拦截与控制台报警
+  if (
+    !import.meta.env.PROD ||
+    typeof window === 'undefined' ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1'
+  ) {
+    return null;
+  }
+
   return (
     <Helmet>
       {/* Cloudflare Web Analytics 脚本 */}

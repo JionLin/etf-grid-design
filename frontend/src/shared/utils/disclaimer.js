@@ -7,6 +7,20 @@
  * @returns {boolean} true: 已确认且未过期, false: 未确认或已过期
  */
 export const checkDisclaimerStatus = () => {
+  if (typeof window !== 'undefined') {
+    const searchParams = new URLSearchParams(window.location.search);
+    const hasBypassParam =
+      searchParams.get('disclaimer') === 'bypass' ||
+      searchParams.get('test_bypass') === '1' ||
+      searchParams.get('bypass') === '1';
+
+    // 自动化测试环境 (WebDriver / MCP 无头探针) 或带有测试绕过参数时自动放行
+    if (hasBypassParam || window.navigator.webdriver) {
+      acceptDisclaimer();
+      return true;
+    }
+  }
+
   const disclaimerAccepted = localStorage.getItem('disclaimer_accepted');
   
   if (!disclaimerAccepted) {

@@ -1,24 +1,15 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Database,
   RefreshCw,
   Trash2,
   ChevronDown,
   ChevronUp,
-  ArrowUpRight,
-  ArrowDownRight,
-  Download,
-  Filter,
   Layers,
-  Calendar,
   Sparkles,
-  TrendingUp,
   Search,
-  CheckCircle2,
-  AlertTriangle,
   Award,
   BarChart3,
-  ListFilter,
   FileSpreadsheet,
 } from "lucide-react";
 import {
@@ -27,7 +18,6 @@ import {
   deleteBacktestRecord,
   getBacktestDistinctETFs,
   getUniverseBacktestMatrix,
-  getSectorsRanking,
   isAbortError,
 } from "@shared/services/api";
 import {
@@ -36,6 +26,7 @@ import {
   archiveStepLabel,
   buildArchiveListParams,
 } from "./archiveFilters";
+import MatrixTableRow from "./MatrixTableRow";
 
 export default function BacktestArchiveView({ onApplyParams, isEmbedded = false }) {
   // 当前活动的主视图: 'matrix' (多周期矩阵) | 'sectors' (11大赛道横评) | 'records' (明细流水账)
@@ -69,14 +60,15 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
   const [selectedSector, setSelectedSector] = useState("全部");
   const [selectedStepMode, setSelectedStepMode] = useState("");
   const [latestOnly, setLatestOnly] = useState(true);
+  const [recordsPage, setRecordsPage] = useState(1);
+  const recordsPageSize = 10;
 
   // 展开流水详情
   const [expandedRunId, setExpandedRunId] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState({});
-  const [detailRail, setDetailRail] = useState("all");
-  const [detailPage, setDetailPage] = useState(1);
-  const detailPageSize = 20;
+  const [, setDetailRail] = useState("all");
+  const [, setDetailPage] = useState(1);
 
   // 格式化测算时间
   const formatRecordTime = (timeStr) => {
@@ -119,7 +111,7 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
     }
   };
 
-  const loadRecords = async (signal) => {
+  const loadRecords = useCallback(async (signal) => {
     setRecordsLoading(true);
     setRecordsError(null);
     try {
@@ -148,7 +140,7 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
     } finally {
       if (!signal?.aborted) setRecordsLoading(false);
     }
-  };
+  }, [selectedEtf, selectedDays, latestOnly, selectedSector, selectedStepMode]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -163,12 +155,32 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
       loadRecords(controller.signal);
       return () => controller.abort();
     }
-  }, [activeView, selectedEtf, selectedDays, latestOnly, selectedSector, selectedStepMode]);
+  }, [activeView, loadRecords]);
+
+  // 筛选变动时流水账页码重置
+  useEffect(() => {
+    setRecordsPage(1);
+  }, [selectedEtf, selectedDays, latestOnly, selectedSector, selectedStepMode]);
+
+  // 预热矩阵多周期数值索引，大幅减少排序与过滤时的深层嵌套寻址
+  const preprocessedMatrixRecords = useMemo(() => {
+    return (matrixData.records || []).map((item) => {
+      const p = item.periods || {};
+      return {
+        ...item,
+        _val_90d: p["90d"]?.annual_return ?? -9999,
+        _val_180d: p["180d"]?.annual_return ?? -9999,
+        _val_1y: p["1y"]?.annual_return ?? -9999,
+        _val_2y: p["2y"]?.annual_return ?? -9999,
+        _val_3y: p["3y"]?.annual_return ?? -9999,
+        _val_5y: p["5y"]?.annual_return ?? -9999,
+      };
+    });
+  }, [matrixData.records]);
 
   // 矩阵过滤与排序
   const filteredMatrixRecords = useMemo(() => {
-    const raw = matrixData.records || [];
-    let list = raw.filter((item) => {
+    let list = preprocessedMatrixRecords.filter((item) => {
       // 搜索代码或名称
       if (matrixSearch.trim()) {
         const q = matrixSearch.trim().toLowerCase();
@@ -189,23 +201,29 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
       return true;
     });
 
-    // 排序
+    // 扁平数值高效排序
+    const sortKey = `_val_${matrixSortField}`;
     list.sort((a, b) => {
-      const valA = a.periods?.[matrixSortField]?.annual_return;
-      const valB = b.periods?.[matrixSortField]?.annual_return;
-      if (valA === null || valA === undefined) return 1;
-      if (valB === null || valB === undefined) return -1;
+      const valA = a[sortKey] ?? -9999;
+      const valB = b[sortKey] ?? -9999;
       return matrixSortOrder === "desc" ? valB - valA : valA - valB;
     });
 
     return list;
-  }, [matrixData, matrixSearch, matrixSector, matrixSortField, matrixSortOrder, onlyValid5y]);
+  }, [preprocessedMatrixRecords, matrixSearch, matrixSector, matrixSortField, matrixSortOrder, onlyValid5y]);
 
   const totalMatrixPages = Math.ceil(filteredMatrixRecords.length / matrixPageSize) || 1;
   const currentMatrixList = useMemo(() => {
     const start = (matrixPage - 1) * matrixPageSize;
     return filteredMatrixRecords.slice(start, start + matrixPageSize);
-  }, [filteredMatrixRecords, matrixPage]);
+  }, [filteredMatrixRecords, matrixPage, matrixPageSize]);
+
+  // 流水账分页数据受控切片，避免无节制平铺几千 DOM 节点
+  const totalRecordsPages = Math.ceil(records.length / recordsPageSize) || 1;
+  const currentRecordsList = useMemo(() => {
+    const start = (recordsPage - 1) * recordsPageSize;
+    return records.slice(start, start + recordsPageSize);
+  }, [records, recordsPage, recordsPageSize]);
 
   // 切换展开/收起详情 (流水账)
   const toggleDetail = async (runId) => {
@@ -333,38 +351,6 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
     link.click();
   };
 
-  const renderReturnBadge = (periodObj) => {
-    if (!periodObj || !periodObj.is_valid || (periodObj.annual_return === null && periodObj.total_return === null)) {
-      return (
-        <span className="text-gray-300 font-mono text-xs" title={periodObj?.reason || "上市不足"}>
-          -
-        </span>
-      );
-    }
-    const isTotal = yieldDisplayMode === "total";
-    const mainVal = isTotal ? periodObj.total_return : periodObj.annual_return;
-    const subVal = isTotal ? periodObj.annual_return : periodObj.total_return;
-    const isPositive = (mainVal ?? 0) >= 0;
-
-    return (
-      <div className="flex flex-col items-end">
-        <span
-          className={`font-mono font-bold text-xs ${
-            isPositive ? "text-red-600" : "text-emerald-600"
-          }`}
-        >
-          {mainVal !== null && mainVal !== undefined ? (isPositive ? `+${mainVal}%` : `${mainVal}%`) : "-"}
-        </span>
-        <div className="flex items-center gap-1 text-[10px] text-gray-400 font-mono">
-          <span>{isTotal ? "年化" : "累计"} {subVal !== null && subVal !== undefined ? (subVal >= 0 ? `+${subVal}%` : `${subVal}%`) : "-"}</span>
-          {periodObj.max_drawdown !== null && (
-            <span>· 回撤 -{periodObj.max_drawdown}%</span>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <div className="space-y-4">
       {/* 顶部总标题与视图切换导航 */}
@@ -473,14 +459,14 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
             </div>
 
             {/* 排序周期选择 */}
-            <div>
+            <div className="flex items-center gap-1.5">
               <select
                 value={matrixSortField}
                 onChange={(e) => {
                   setMatrixSortField(e.target.value);
                   setMatrixPage(1);
                 }}
-                className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500 text-xs"
+                className="w-full px-3 py-1.5 bg-white border border-gray-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500 text-xs font-sans"
               >
                 <option value="5y">按 5年年化 排序</option>
                 <option value="3y">按 3年年化 排序</option>
@@ -488,6 +474,14 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
                 <option value="180d">按 半年年化 排序</option>
                 <option value="90d">按 90天年化 排序</option>
               </select>
+              <button
+                type="button"
+                onClick={() => setMatrixSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))}
+                className="px-2 py-1.5 bg-white border border-gray-200 hover:border-indigo-300 hover:text-indigo-600 rounded-lg text-xs font-mono font-medium text-gray-700 shrink-0 transition-colors shadow-2xs"
+                title={matrixSortOrder === "desc" ? "当前为降序（高收益在前），点击切换为升序" : "当前为升序（低收益在前），点击切换为降序"}
+              >
+                {matrixSortOrder === "desc" ? "↓ 降序" : "↑ 升序"}
+              </button>
             </div>
 
             {/* 收益显示模式切换单选胶囊 (用户指定要求) */}
@@ -588,54 +582,15 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
                   </thead>
                   <tbody className="divide-y divide-gray-100 font-mono">
                     {currentMatrixList.map((item, idx) => {
-                      const p = item.periods || {};
                       const rowNum = (matrixPage - 1) * matrixPageSize + idx + 1;
-                      const freeShares5y = p["5y"]?.free_shares;
-
                       return (
-                        <tr
+                        <MatrixTableRow
                           key={item.etf_code}
-                          className="hover:bg-indigo-50/30 transition-colors"
-                        >
-                          <td className="py-2 px-3 text-center text-gray-400 font-sans text-[11px]">
-                            {rowNum}
-                          </td>
-                          <td className="py-2 px-3 font-bold text-indigo-600">
-                            {item.etf_code}
-                          </td>
-                          <td className="py-2 px-3 font-sans font-medium text-gray-900 truncate max-w-[140px]" title={item.etf_name}>
-                            {item.etf_name}
-                          </td>
-                          <td className="py-2 px-3 font-sans">
-                            <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-[10px]">
-                              {item.sector || "未入池"}
-                            </span>
-                          </td>
-                          <td className="py-2 px-3">{renderReturnBadge(p["90d"])}</td>
-                          <td className="py-2 px-3">{renderReturnBadge(p["180d"])}</td>
-                          <td className="py-2 px-3">{renderReturnBadge(p["1y"])}</td>
-                          <td className="py-2 px-3">{renderReturnBadge(p["2y"])}</td>
-                          <td className="py-2 px-3">{renderReturnBadge(p["3y"])}</td>
-                          <td className="py-2 px-3 bg-indigo-50/20 text-right">
-                            <div className="flex flex-col items-end">
-                              {renderReturnBadge(p["5y"])}
-                              {freeShares5y > 0 && (
-                                <span className="text-[10px] text-amber-700 font-medium">
-                                  🪙 留存 {freeShares5y.toLocaleString()} 股
-                                </span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="py-2 px-3 text-center font-sans">
-                            <button
-                              onClick={(e) => handleApplyMatrixParams(item, e)}
-                              className="px-2.5 py-1 bg-white border border-indigo-200 hover:border-indigo-400 text-indigo-600 hover:bg-indigo-50 rounded text-[11px] font-medium transition-all shadow-2xs"
-                              title="将此标的代码与网格配置回填至首页策略设计器"
-                            >
-                              应用策略
-                            </button>
-                          </td>
-                        </tr>
+                          item={item}
+                          rowNum={rowNum}
+                          yieldDisplayMode={yieldDisplayMode}
+                          onApply={handleApplyMatrixParams}
+                        />
                       );
                     })}
                   </tbody>
@@ -897,7 +852,7 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
             </div>
           ) : (
             <div className="space-y-4">
-              {records.map((rec) => {
+              {currentRecordsList.map((rec) => {
                 const isExpanded = expandedRunId === rec.run_id;
                 const currentDetail = detailData[rec.run_id];
 
@@ -1024,6 +979,34 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
                   </div>
                 );
               })}
+
+              {/* 流水账受控分页导航 */}
+              {totalRecordsPages > 1 && (
+                <div className="flex items-center justify-between pt-3 text-xs text-gray-500 font-sans border-t border-gray-200">
+                  <div>
+                    共 <span className="font-mono font-bold text-gray-700">{records.length}</span> 条历史回测记录
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={recordsPage <= 1}
+                      onClick={() => setRecordsPage((p) => Math.max(1, p - 1))}
+                      className="px-2.5 py-1 bg-white border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium transition-colors shadow-2xs"
+                    >
+                      上一页
+                    </button>
+                    <span className="font-mono px-1">
+                      {recordsPage} / {totalRecordsPages}
+                    </span>
+                    <button
+                      disabled={recordsPage >= totalRecordsPages}
+                      onClick={() => setRecordsPage((p) => Math.min(totalRecordsPages, p + 1))}
+                      className="px-2.5 py-1 bg-white border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed font-medium transition-colors shadow-2xs"
+                    >
+                      下一页
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

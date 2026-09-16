@@ -1,41 +1,57 @@
 import React, { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import HeroSection from "./components/HeroSection";
 import ETFActivePoolRadar from "./components/ETFActivePoolRadar";
+import QuickConfigPanel from "./components/QuickConfigPanel";
 import BacktestArchiveView from "@features/analysis/components/ReportCards/BacktestArchiveView";
 import ParameterForm from "@features/analysis/components/ParameterForm";
 import AnalysisHistory from "@features/history/components/AnalysisHistory";
-import { generateAnalysisURL } from "@shared/utils/url";
+import { encodeAnalysisParams } from "@shared/utils/url";
 
 /**
  * 首页组件
  * 负责展示首页内容和处理分析请求
  */
 export default function HomePage() {
+  const navigate = useNavigate();
   const formSectionRef = useRef(null);
   const parameterFormRef = useRef(null);
   const [selectionMode, setSelectionMode] = useState("radar"); // 'radar' | 'matrix'
+  const [selectedEtfForQuick, setSelectedEtfForQuick] = useState({
+    code: "510300",
+    name: "华泰柏瑞沪深300ETF",
+    sector: "核心宽基",
+  });
 
-  // 处理分析请求 - 跳转到分析页面
+  // 处理分析请求 - 使用 SPA 客户端路由平滑跳转到分析页面
   const handleAnalysis = async (parameters) => {
-    const analysisUrl = generateAnalysisURL(parameters.etfCode, parameters);
-    window.location.href = analysisUrl;
+    const searchParams = encodeAnalysisParams(parameters);
+    const queryString = searchParams.toString();
+    navigate(`/analysis/${parameters.etfCode}${queryString ? `?${queryString}` : ""}`);
   };
 
-  const handleSelectETF = (code) => {
-    parameterFormRef.current?.selectEtf(code);
-    scrollToParameterForm();
+  // 桌面端点选标的：原地激活右侧驾驶舱并静默同步代码，不发生纵向暴滚
+  const handleSelectETF = (code, fullItem) => {
+    const item = fullItem || { code, etf_code: code, name: `ETF ${code}` };
+    setSelectedEtfForQuick(item);
+    parameterFormRef.current?.selectEtf(code, { shouldScroll: false });
   };
 
-  const handleApplyFromMatrix = (params, record) => {
+  const handleApplyFromMatrix = (params) => {
     if (params?.etfCode) {
-      parameterFormRef.current?.selectEtf(params.etfCode);
-      scrollToParameterForm();
+      handleSelectETF(params.etfCode, {
+        code: params.etfCode,
+        etf_code: params.etfCode,
+        name: `ETF ${params.etfCode}`,
+      });
     }
   };
 
   const scrollToParameterForm = () => {
-    if (formSectionRef.current) {
+    if (selectedEtfForQuick?.code) {
+      parameterFormRef.current?.selectEtf(selectedEtfForQuick.code, { shouldScroll: true });
+    } else if (formSectionRef.current) {
       formSectionRef.current.scrollIntoView({
         behavior: "smooth",
         block: "start",
@@ -95,13 +111,24 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* 选品视图展示 */}
-          <div>
-            {selectionMode === "radar" ? (
-              <ETFActivePoolRadar onSelectETF={handleSelectETF} isEmbedded={true} />
-            ) : (
-              <BacktestArchiveView onApplyParams={handleApplyFromMatrix} isEmbedded={true} />
-            )}
+          {/* 桌面端高密布局：左侧选品决策中心 + 右侧即时策略驾驶舱 */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+            <div className="xl:col-span-8 2xl:col-span-9 min-w-0">
+              {selectionMode === "radar" ? (
+                <ETFActivePoolRadar onSelectETF={handleSelectETF} isEmbedded={true} />
+              ) : (
+                <BacktestArchiveView onApplyParams={handleApplyFromMatrix} isEmbedded={true} />
+              )}
+            </div>
+
+            {/* 右侧快速策略驾驶舱 (桌面端常驻并吸顶跟随) */}
+            <div className="xl:col-span-4 2xl:col-span-3 sticky top-4">
+              <QuickConfigPanel
+                selectedEtf={selectedEtfForQuick}
+                onLaunch={handleAnalysis}
+                onOpenFullForm={scrollToParameterForm}
+              />
+            </div>
           </div>
         </div>
 

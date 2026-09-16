@@ -20,7 +20,7 @@ export function filterByStoredSubsector(items, subsectorName) {
   if (!subsectorName || subsectorName === "全部") {
     return items;
   }
-  return items.filter((item) => item.subsector === subsectorName);
+  return items.filter((item) => (item.subsector || "其他") === subsectorName);
 }
 
 export function subsectorsForSector(summary, sector) {

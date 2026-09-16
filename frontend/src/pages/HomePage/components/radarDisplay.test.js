@@ -61,3 +61,24 @@ test("aggregateSectorCounts dynamically computes counts matching mature pool", (
   assert.equal(Object.values(map).reduce((a, b) => a + b, 0), items.length);
 });
 
+test("drill-down other subsector matches null, undefined, empty, or explicit 其他", () => {
+  const items = [
+    { name: "建材ETF国泰", subsector: null },
+    { name: "矿业ETF国泰", subsector: undefined },
+    { name: "未命中小类ETF", subsector: "" },
+    { name: "显式其他ETF", subsector: "其他" },
+    { name: "有色金属ETF南方", subsector: "有色金属" },
+  ];
+  const otherItems = filterByStoredSubsector(items, "其他");
+  assert.deepEqual(
+    otherItems.map((item) => item.name),
+    ["建材ETF国泰", "矿业ETF国泰", "未命中小类ETF", "显式其他ETF"]
+  );
+  const metalItems = filterByStoredSubsector(items, "有色金属");
+  assert.deepEqual(
+    metalItems.map((item) => item.name),
+    ["有色金属ETF南方"]
+  );
+});
+
+

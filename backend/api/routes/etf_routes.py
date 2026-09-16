@@ -28,6 +28,7 @@ def get_popular_etfs():
         }), 500
 
 @etf_bp.route('/api/etf/basic-info/<etf_code>', methods=['GET'])
+@etf_bp.route('/api/etf/info/<etf_code>', methods=['GET'])
 def get_etf_basic_info(etf_code):
     """获取ETF基础信息"""
     try:

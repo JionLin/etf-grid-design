@@ -36,6 +36,10 @@ class ApiService {
 
       return await response.json();
     } catch (error) {
+      if (error?.name === "AbortError" || error?.code === "ERR_CANCELED") {
+        // 良性取消，静默抛出以便调用方捕获判定，不向控制台记录红字
+        throw error;
+      }
       console.error(`API请求失败 [${endpoint}]:`, error);
       throw error;
     }
@@ -98,8 +102,15 @@ class ApiService {
   /**
    * 获取ETF基础信息
    */
-  async getETFInfo(etfCode) {
-    return this.get("/etf/info", { code: etfCode });
+  async getETFBasicInfo(etfCode, options = {}) {
+    return this.get(`/etf/basic-info/${etfCode}`, {}, options);
+  }
+
+  /**
+   * 兼容旧版方法
+   */
+  async getETFInfo(etfCode, options = {}) {
+    return this.getETFBasicInfo(etfCode, options);
   }
 
   /**
@@ -206,7 +217,8 @@ export function isAbortError(error) {
   return error?.name === "AbortError";
 }
 export const getEdaLiterature = () => apiService.getEdaLiterature();
-export const getETFInfo = (etfCode) => apiService.getETFInfo(etfCode);
+export const getETFBasicInfo = (etfCode, options) => apiService.getETFBasicInfo(etfCode, options);
+export const getETFInfo = (etfCode, options) => apiService.getETFInfo(etfCode, options);
 export const getPopularETFs = () => apiService.getPopularETFs();
 export const validateETFCode = (etfCode) => apiService.validateETFCode(etfCode);
 export const getHistoricalData = (etfCode, startDate, endDate) =>

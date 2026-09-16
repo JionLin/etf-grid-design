@@ -1,5 +1,12 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
+import SearchHistoryDropdown from "./SearchHistoryDropdown";
+import {
+  getSearchHistory,
+  saveSearchHistoryItem,
+  removeSearchHistoryItem,
+  clearSearchHistory,
+} from "@shared/utils/searchHistoryStorage";
 import {
   CARD_RENDER_LIMIT,
   DEFAULT_COLLAPSE_LIMIT,
@@ -27,6 +34,90 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
   const [unclassifiedItems, setUnclassifiedItems] = useState([]);
   const [maturityFilter, setMaturityFilter] = useState("5y"); // 默认展示满 5 年期 (历经完整牛熊)
   const [isExpanded, setIsExpanded] = useState(false); // 默认收拢，仅展示前 6 只精选
+
+  // 搜索历史状态
+  const [searchHistory, setSearchHistory] = useState([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const searchContainerRef = useRef(null);
+  const searchInputRef = useRef(null);
+
+  useEffect(() => {
+    setSearchHistory(getSearchHistory());
+  }, []);
+
+  // 全局快捷键：/ 或 Cmd+K / Ctrl+K 聚焦搜索框
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const activeTag = document.activeElement?.tagName;
+      const isTyping = activeTag === "INPUT" || activeTag === "TEXTAREA";
+
+      if (
+        (e.key === "/" && !isTyping) ||
+        ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k")
+      ) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        setIsHistoryOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const handleRecordHistory = (item) => {
+    if (!item?.etf_code && !item?.code) return;
+    const updated = saveSearchHistoryItem({
+      code: item.etf_code || item.code,
+      name: item.name,
+      sector: item.sector,
+    });
+    setSearchHistory(updated);
+  };
+
+  const handleSelectFromHistory = (historyItem) => {
+    setSearchKeyword(historyItem.code);
+    setIsHistoryOpen(false);
+    handleRecordHistory(historyItem);
+    if (onSelectETF) {
+      onSelectETF(historyItem.code);
+    }
+  };
+
+  const handleRemoveHistory = (code) => {
+    const updated = removeSearchHistoryItem(code);
+    setSearchHistory(updated);
+  };
+
+  const handleClearHistory = () => {
+    clearSearchHistory();
+    setSearchHistory([]);
+  };
+
+  const renderScoreBadge = (score) => {
+    if (score === undefined || score === null) return null;
+    const num = Number(score);
+    if (num >= 80) {
+      return (
+        <span className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800 shrink-0">
+          {num}分·极佳
+        </span>
+      );
+    }
+    if (num >= 60) {
+      return (
+        <span className="bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-800 shrink-0">
+          {num}分·适中
+        </span>
+      );
+    }
+    return (
+      <span className="bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-slate-400 text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">
+        {num}分
+      </span>
+    );
+  };
 
   // 当一级分类变更时，重置二级分类为“全部”且重置展开状态
   const handlePrimarySectorChange = (sector) => {
@@ -227,16 +318,38 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
           </p>
         </div>
 
-        {/* 快捷搜索框 */}
-        <div className="relative w-full sm:w-64">
+        {/* 快捷搜索框 (带历史下拉) */}
+        <div ref={searchContainerRef} className="relative w-full sm:w-72">
           <input
+            ref={searchInputRef}
             type="text"
-            placeholder="搜索代码 / 名称..."
+            placeholder="搜索代码 / 名称... (按 / 聚焦)"
             value={searchKeyword}
+            onFocus={() => setIsHistoryOpen(true)}
+            onBlur={() => {
+              // 延迟关闭，确保点击下拉项能被触发
+              setTimeout(() => setIsHistoryOpen(false), 200);
+            }}
             onChange={(e) => setSearchKeyword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && filteredItems.length > 0) {
+                const target = filteredItems[0];
+                handleRecordHistory(target);
+                if (onSelectETF) onSelectETF(target.etf_code);
+                setIsHistoryOpen(false);
+              }
+            }}
             className="w-full pl-9 pr-4 py-2 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-gray-100"
           />
           <span className="absolute left-3 top-2.5 text-gray-400 text-sm">🔍</span>
+
+          <SearchHistoryDropdown
+            history={searchHistory}
+            isOpen={isHistoryOpen && !searchKeyword.trim()}
+            onSelect={handleSelectFromHistory}
+            onRemove={handleRemoveHistory}
+            onClear={handleClearHistory}
+          />
         </div>
       </div>
 
@@ -479,25 +592,41 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
             return (
               <div
                 key={item.etf_code}
-                onClick={() => onSelectETF && onSelectETF(item.etf_code)}
+                onClick={() => {
+                  handleRecordHistory(item);
+                  if (onSelectETF) onSelectETF(item.etf_code, item);
+                }}
                 className="bg-white dark:bg-gray-800/90 border border-gray-100 dark:border-gray-700/80 rounded-xl p-4 hover:shadow-lg hover:border-blue-400 dark:hover:border-blue-500 transition-all duration-200 group flex flex-col justify-between cursor-pointer"
               >
                 <div>
                   {/* 第一行：代码、名称与徽章 */}
                   <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0 pr-1">
+                      {item.is_seed && (
+                        <span
+                          className="bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-200 text-[10px] font-black px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-700 shrink-0 flex items-center gap-0.5"
+                          title="该细分赛道代表性种子标的"
+                        >
+                          <span>👑</span>
+                          <span>种子</span>
+                        </span>
+                      )}
                       <span className="font-mono font-black text-gray-900 dark:text-gray-100 text-base">
                         {item.etf_code}
                       </span>
-                      <span className="font-bold text-gray-800 dark:text-gray-200 text-sm line-clamp-1">
+                      <span className="font-bold text-gray-800 dark:text-gray-200 text-sm truncate">
                         {item.name}
                       </span>
                     </div>
-                    {item.is_t0 && (
-                      <span className="bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 text-[10px] font-black px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-800">
-                        T+0
-                      </span>
-                    )}
+
+                    <div className="flex items-center gap-1 shrink-0">
+                      {item.is_t0 && (
+                        <span className="bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 text-[10px] font-black px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-800">
+                          T+0
+                        </span>
+                      )}
+                      {renderScoreBadge(item.score)}
+                    </div>
                   </div>
 
                   {/* 第二行：赛道分类与弹性标签 */}
@@ -505,17 +634,24 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
                     <span className="bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs px-2 py-0.5 rounded">
                       {item.sector}
                     </span>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded font-medium ${
-                        item.elasticity === "高弹性"
-                          ? "bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400"
-                          : item.elasticity === "稳健型"
-                          ? "bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400"
-                          : "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400"
-                      }`}
-                    >
-                      {item.elasticity} (ATR {item.atr_pct}%)
-                    </span>
+                    {Number(item.atr_pct) >= 1.8 && Number(item.atr_pct) <= 4.0 ? (
+                      <span className="bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/80 text-xs px-2 py-0.5 rounded font-bold flex items-center gap-1">
+                        <span>🟢 黄金做T区</span>
+                        <span className="font-mono font-normal text-[11px]">(ATR {item.atr_pct}%)</span>
+                      </span>
+                    ) : (
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded font-medium ${
+                          item.elasticity === "高弹性"
+                            ? "bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400"
+                            : item.elasticity === "稳健型"
+                            ? "bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400"
+                            : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400"
+                        }`}
+                      >
+                        {item.elasticity} (ATR {item.atr_pct}%)
+                      </span>
+                    )}
                   </div>
 
                   {/* 第三行：行情与流动性指标 */}
@@ -550,14 +686,15 @@ export default function ETFActivePoolRadar({ onSelectETF }) {
                   type="button"
                   onClick={(event) => {
                     event.stopPropagation();
+                    handleRecordHistory(item);
                     if (onSelectETF) {
-                      onSelectETF(item.etf_code);
+                      onSelectETF(item.etf_code, item);
                     }
                   }}
                   className="w-full mt-1 py-1.5 bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white dark:bg-blue-950/50 dark:hover:bg-blue-600 dark:text-blue-300 dark:hover:text-white text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1 group-hover:scale-[1.02]"
                 >
-                  <span>↓</span>
-                  <span>填入下方代码</span>
+                  <span>⚡</span>
+                  <span>快速测算 (载入右侧)</span>
                 </button>
               </div>
             );

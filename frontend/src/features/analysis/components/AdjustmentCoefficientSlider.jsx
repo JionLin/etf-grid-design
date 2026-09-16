@@ -78,30 +78,6 @@ export default function AdjustmentCoefficientSlider({ value, onChange }) {
           <p>• 可以通过调节该系数获得更多差异化的方案（比如，调到最大系数后选择低频+高频的组合网格）</p>
         </div>
       </div>
-
-      {/* 自定义样式 */}
-      <style jsx>{`
-        .slider::-webkit-slider-thumb {
-          appearance: none;
-          height: 20px;
-          width: 20px;
-          border-radius: 50%;
-          background: #3b82f6;
-          cursor: pointer;
-          border: 2px solid #ffffff;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-        }
-        
-        .slider::-moz-range-thumb {
-          height: 20px;
-          width: 20px;
-          border-radius: 50%;
-          background: #3b82f6;
-          cursor: pointer;
-          border: 2px solid #ffffff;
-          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-        }
-      `}</style>
     </div>
   );
 }
