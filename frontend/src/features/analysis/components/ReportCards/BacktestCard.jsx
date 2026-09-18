@@ -523,6 +523,11 @@ const BacktestCard = ({
               <div className="text-[11px] text-gray-500 mt-1 truncate" title={`总成交 ${summary.total_trades_count} 笔 (买${summary.buy_trades_count}/卖${summary.sell_trades_count})`}>
                 总成交 {summary.total_trades_count} 笔
               </div>
+              {summary.unclosed_profit > 0 && (
+                <div className="text-[11px] text-amber-600 mt-0.5 truncate" title="底仓高抛后未按设计回调价买回的卖出，该部分利润为预估未实现">
+                  其中未闭环 +¥{Number(summary.unclosed_profit).toLocaleString()}
+                </div>
+              )}
             </div>
           </div>
 

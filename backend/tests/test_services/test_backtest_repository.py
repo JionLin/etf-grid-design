@@ -132,9 +132,40 @@ class TestBacktestRepository(unittest.TestCase):
         
         # 验证做 T 纯利润准确提取
         self.assertEqual(rec['total_profit'], 2888.50)
-        # 验证科学年化收益率折算 (12.5 * 365 / 182 = 25.07)
-        self.assertAlmostEqual(rec['annual_return'], 25.07, places=1)
+        # 验证复利年化收益率折算 CAGR ((1+0.125)^(365/182)-1) ≈ 26.64
+        self.assertAlmostEqual(rec['annual_return'], 26.6, places=1)
         self.assertEqual(rec['total_trades'], 50)
+
+    def test_save_run_dedup_same_result_skips_insert(self):
+        """测试同参数同结果的重复回测保存被幂等跳过，不再产生新档案行"""
+        mock_result = {
+            'summary': {
+                'annualized_return': 10.0,
+                'total_profit': 1000.0,
+                'max_drawdown': 3.2,
+                'total_trades_count': 12,
+            },
+            'profit_pool': {'free_shares': 0},
+            'equity_curve': [{'date': '2025-01-01', 'nav': 1.0}],
+            'total_trades_all': [],
+            'history_meta': {'actual_calendar_days': 180},
+        }
+
+        id_1 = self.repo.save_run('515880', '通信ETF', 180, 50000.0, 'atr', 'cash', mock_result)
+        id_2 = self.repo.save_run('515880', '通信ETF', 180, 50000.0, 'atr', 'cash', mock_result)
+
+        # 同结果重复保存应返回同一 run_id，且库中仅 1 条
+        self.assertEqual(id_1, id_2)
+        runs = self.repo.list_runs(etf_code='515880', latest_only=False)
+        self.assertEqual(runs['total'], 1)
+        self.assertEqual(runs['records'][0]['run_id'], id_1)
+
+        # 不同结果（参数变化导致结果不同）仍应新增
+        mock_other = dict(mock_result)
+        mock_other['summary'] = dict(mock_result['summary'], total_profit=2000.0)
+        id_3 = self.repo.save_run('515880', '通信ETF', 180, 50000.0, 'atr', 'cash', mock_other)
+        self.assertNotEqual(id_1, id_3)
+        self.assertEqual(self.repo.list_runs(etf_code='515880', latest_only=False)['total'], 2)
 
     def test_list_runs_sorted_by_longest_period_desc(self):
         """测试档案库列表严格按照回测周期最长(backtest_days DESC)倒序排列"""

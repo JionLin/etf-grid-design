@@ -224,7 +224,8 @@ class GridBacktestEngine:
             "large": {"name": "大网 (估值防守)", "tag": "大网", "trades_count": 0, "profit": 0.0},
         }
 
-        peak_equity = initial_capital
+        # 最大回撤从首个净值点起算（peak 初始为 0，而非初始本金，避免首日建仓浮亏被误计入回撤）
+        peak_equity = 0.0
         max_drawdown = 0.0
         total_commission = 0.0
 
@@ -318,6 +319,8 @@ class GridBacktestEngine:
                     "rail": slot.rail,
                     "rail_name": slot.rail_name,
                     "tag": slot.tag,
+                    "slot_id": slot.slot_id,
+                    "slot_type": slot.slot_type,
                 })
 
                 # 槽位状态转移：由 WAIT_SELL 重置回 WAIT_BUY (释放该档，允许再吸)
@@ -368,6 +371,8 @@ class GridBacktestEngine:
                     "rail": slot.rail,
                     "rail_name": slot.rail_name,
                     "tag": slot.tag,
+                    "slot_id": slot.slot_id,
+                    "slot_type": slot.slot_type,
                 })
 
                 # 槽位状态转移：由 WAIT_BUY 锁定为 WAIT_SELL (已持仓，严禁重复买)
@@ -429,6 +434,22 @@ class GridBacktestEngine:
         # 网格做 T 纯差价落袋利润总额
         grid_cash_profit = sum(t.get("profit", 0.0) for t in trades if t["action"] == "SELL")
 
+        # 未闭环高抛利润统计：SELL_GRID 卖出后从未按设计回调价买回时，该笔利润为预估未实现
+        unclosed_profit = 0.0
+        unclosed_count = 0
+        for i, t in enumerate(trades):
+            if t["action"] != "SELL" or t.get("slot_type") != "SELL_GRID":
+                continue
+            slot_id = t.get("slot_id")
+            has_rebuy = any(
+                b["action"] == "BUY" and b.get("slot_id") == slot_id
+                for b in trades[i + 1:]
+            )
+            if not has_rebuy:
+                unclosed_profit += float(t.get("profit", 0.0))
+                unclosed_count += 1
+        unclosed_profit = round(unclosed_profit, 2)
+
         # 4. 三轨利润归因计算
         signed_profits = {
             r_key: round(rail_stats[r_key]["profit"], 2) for r_key in ["small", "medium", "large"]
@@ -463,6 +484,10 @@ class GridBacktestEngine:
                 "paired_trades_count": paired_count,
                 "total_commission": round(total_commission, 2),
                 "grid_cash_profit": round(grid_cash_profit, 2),
+                "unclosed_profit": unclosed_profit,
+                "realized_cash_profit": round(grid_cash_profit - unclosed_profit, 2),
+                "unclosed_sell_count": unclosed_count,
+                "closed_sell_count": sell_count - unclosed_count,
                 "backtest_days": len(df),
                 "start_date": df.iloc[0][date_col].strftime("%Y-%m-%d"),
                 "end_date": df.iloc[-1][date_col].strftime("%Y-%m-%d"),

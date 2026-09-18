@@ -86,7 +86,6 @@ class BacktestRepository:
         backtest_result: Dict[str, Any],
         params: Optional[Dict[str, Any]] = None,
     ) -> str:
-        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         summary = backtest_result.get("summary", {})
         meta = backtest_result.get("history_meta", {}) or summary.get("history_meta", {})
         actual_days = meta.get("actual_trading_days", backtest_days)
@@ -94,6 +93,25 @@ class BacktestRepository:
         profit_pool = backtest_result.get("profit_pool", {}) or summary.get("profit_pool", {})
         created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         bucket = self.step_bucket(step_mode)
+
+        # 先计算派生指标，再做结果指纹查重：同参数同结果的重复回测直接跳过，不再新增档案
+        annual_return = self._annual_return(summary, meta, actual_days)
+        max_drawdown = round(float(summary.get("max_drawdown", 0.0) or 0.0), 2)
+        total_profit = self._total_profit(summary, profit_pool)
+        total_trades = self._total_trades(summary, backtest_result)
+        free_shares = int(profit_pool.get("free_shares", 0) or 0)
+        existing_run_id = self._find_duplicate_run(
+            etf_code, backtest_days, bucket, reinvest_mode, total_capital,
+            annual_return, max_drawdown, total_profit, total_trades, free_shares,
+        )
+        if existing_run_id:
+            logger.info(
+                "重复回测结果已存在，跳过归档: run_id=%s, etf=%s, days=%s",
+                existing_run_id, etf_code, backtest_days,
+            )
+            return existing_run_id
+
+        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}"
         summary_json = json.dumps(summary, ensure_ascii=False)
         params_json = json.dumps(params or {}, ensure_ascii=False)
         equity_json = json.dumps(backtest_result.get("equity_curve", []), ensure_ascii=False)
@@ -123,11 +141,7 @@ class BacktestRepository:
                     (
                         run_id, etf_code, etf_name, backtest_days, actual_days,
                         total_capital, step_mode, bucket, reinvest_mode,
-                        self._annual_return(summary, meta, actual_days),
-                        round(float(summary.get("max_drawdown", 0.0) or 0.0), 2),
-                        self._total_profit(summary, profit_pool),
-                        self._total_trades(summary, backtest_result),
-                        int(profit_pool.get("free_shares", 0) or 0),
+                        annual_return, max_drawdown, total_profit, total_trades, free_shares,
                         is_partial,
                         meta.get("partial_reason"),
                         params_json,
@@ -142,6 +156,46 @@ class BacktestRepository:
         self._insert_payload(run_id, equity_json, trades_json)
         logger.info("回测快照归档成功: run_id=%s, etf=%s", run_id, etf_code)
         return run_id
+
+    def _find_duplicate_run(
+        self,
+        etf_code: str,
+        backtest_days: int,
+        bucket: str,
+        reinvest_mode: str,
+        total_capital: float,
+        annual_return: float,
+        max_drawdown: float,
+        total_profit: float,
+        total_trades: int,
+        free_shares: int,
+    ) -> Optional[str]:
+        """按结果指纹查重：同标的、同周期、同步长、同再投、同资金且关键指标完全一致 → 视为重复回测。"""
+        try:
+            conn = self._connect()
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT run_id FROM backtest_run
+                        WHERE etf_code = %s AND backtest_days = %s AND step_bucket = %s
+                          AND reinvest_mode = %s AND total_capital = %s
+                          AND annual_return = %s AND max_drawdown = %s
+                          AND total_profit = %s AND total_trades = %s AND free_shares = %s
+                        ORDER BY id DESC LIMIT 1
+                        """,
+                        (
+                            etf_code, backtest_days, bucket, reinvest_mode, float(total_capital),
+                            annual_return, max_drawdown, total_profit, total_trades, free_shares,
+                        ),
+                    )
+                    row = cursor.fetchone()
+                    return row["run_id"] if row else None
+            finally:
+                conn.close()
+        except Exception as exc:
+            logger.error("回测结果查重失败，按新增处理: %s", exc)
+            return None
 
     def _insert_payload(self, run_id: str, equity_json: str, trades_json: str) -> None:
         conn = self._connect()
@@ -178,7 +232,9 @@ class BacktestRepository:
         if "annualized_return" in summary:
             return float(summary["annualized_return"])
         if calendar_days and strategy_ret != 0.0:
-            return round(strategy_ret * (365.0 / calendar_days), 2)
+            # 复利年化 (CAGR)：((1 + 区间收益率)^(365/日历天数) - 1) * 100
+            cagr = ((1.0 + strategy_ret / 100.0) ** (365.0 / calendar_days) - 1.0) * 100.0
+            return round(cagr, 2)
         return round(strategy_ret, 2)
 
     def _total_trades(self, summary: Dict[str, Any], result: Dict[str, Any]) -> int:
