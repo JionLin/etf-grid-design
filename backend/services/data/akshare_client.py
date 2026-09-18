@@ -1107,6 +1107,10 @@ class AkShareClient:
                 break
 
         if not all_raw_data:
+            cached = self.market_repo.get_all_bars(clean_code)
+            if not cached.empty:
+                logger.info(f"✓ 外部网络接口拉取为空或异常，使用本地时序库已存 {len(cached)} 根 K 线兜底")
+                return cached
             return pd.DataFrame()
 
         # 去重合并

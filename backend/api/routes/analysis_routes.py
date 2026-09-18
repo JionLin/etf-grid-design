@@ -213,7 +213,7 @@ def run_backtest():
     """网格策略真实历史回测"""
     try:
         data = request.get_json() or {}
-        etf_code = data.get('etfCode')
+        etf_code = data.get('etfCode') or data.get('etf_code')
         if not etf_code:
             return jsonify({'success': False, 'error': 'ETF代码不能为空'}), 400
 

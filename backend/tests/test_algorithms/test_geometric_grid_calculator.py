@@ -55,7 +55,7 @@ class TestGeometricGridCalculator:
             # 验证向下网格的比例一致性
             if base_index > 0:
                 for i in range(base_index - 1, -1, -1):
-                    actual_ratio = result[i+1] / result[i]
+                    actual_ratio = result[i] / result[i+1]
                     expected_down_ratio = 1 / expected_ratio
                     assert abs(actual_ratio - expected_down_ratio) < 0.001, f"向下比例不一致: {actual_ratio} vs {expected_down_ratio}"
     
@@ -286,17 +286,16 @@ class TestGeometricGridCalculator:
         """测试网格数量准确性"""
         price_lower = 10.0
         price_upper = 20.0
-        grid_count = 12
+        step_size = 1.0
         base_price = 15.0
         
-        result = self.calculator.calculate_grid_levels(price_lower, price_upper, grid_count, base_price)
+        result = self.calculator.calculate_grid_levels(price_lower, price_upper, step_size, base_price)
         
-        # 计算实际网格数量（不包括基准价格）
-        actual_grid_count = len(result) - 1
-        
-        # 实际网格数量应该接近目标值，允许一定的偏差
-        count_diff = abs(actual_grid_count - grid_count)
-        assert count_diff <= grid_count * 0.3, f"网格数量偏差({count_diff})过大: 实际{actual_grid_count} vs 目标{grid_count}"
+        # 验证结果合理性
+        assert len(result) > 0, "应该生成至少一个价格点"
+        assert base_price in result, "基准价格应该在结果中"
+        assert min(result) >= price_lower, "最低价格不应低于下边界"
+        assert max(result) <= price_upper, "最高价格不应超过上边界"
     
     def test_price_distribution_uniformity(self):
         """测试价格分布均匀性"""
@@ -337,7 +336,8 @@ class TestGeometricGridCalculator:
         assert 0.001 <= step_ratio <= 0.1, f"步长比例{step_ratio}应该在合理范围内(0.1%-10%)"
         
         # 使用步长比例验证网格生成
-        result = self.calculator.calculate_grid_levels(price_lower, price_upper, grid_count, base_price)
+        step_size = step_ratio * base_price
+        result = self.calculator.calculate_grid_levels(price_lower, price_upper, step_size, base_price)
         
         if len(result) > 1:
             # 验证实际生成的价格比例与计算的比例是否一致

@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = "v1"
 PROTOCOL_CAPITAL = 30000.0
 PROTOCOL_WINDOW_DAYS = 1825
+FULL_SAMPLE_FLOOR_DAYS = 1800  # 容忍 A 股因周末与节假日休市产生的日历日跨度偏差（真实5年日K首尾通常为1815~1822天）
 SHORT_SAMPLE_FLOOR_DAYS = 1095
 ATR_SELL_FLOOR = 12
 EDA_SELL_FLOOR = 2
@@ -67,7 +68,7 @@ def classify_protocol_cell(
             "cash_yield": cash_yield,
             "rank": None,
         }
-    if calendar_days < PROTOCOL_WINDOW_DAYS:
+    if calendar_days < FULL_SAMPLE_FLOOR_DAYS:
         return {
             "status": "short_sample",
             "status_reason": "样本短于五年",

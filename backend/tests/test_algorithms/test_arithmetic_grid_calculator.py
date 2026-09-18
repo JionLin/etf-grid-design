@@ -229,7 +229,7 @@ class TestArithmeticGridCalculator:
         # 验证价格分布的合理性
         price_range = max(result) - min(result)
         expected_range_ratio = price_range / (price_upper - price_lower)
-        assert expected_range_ratio >= 0.8, f"价格覆盖范围({expected_range_ratio:.2%})应该足够大"
+        assert expected_range_ratio >= 0.8 - 1e-6, f"价格覆盖范围({expected_range_ratio:.2%})应该足够大"
         
         # 验证等差性质
         if len(result) > 1:

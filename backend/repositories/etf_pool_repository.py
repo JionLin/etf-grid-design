@@ -381,7 +381,9 @@ class ETFPoolRepository:
                         """
                         UPDATE etf_instrument
                         SET sector = %s, subsector_code = %s, is_t0 = %s,
-                            atr_pct = %s, elasticity = %s, updated_at = %s
+                            atr_pct = CASE WHEN atr_pct IS NULL OR atr_pct = 0 THEN %s ELSE atr_pct END,
+                            elasticity = CASE WHEN elasticity IS NULL OR elasticity = '' THEN %s ELSE elasticity END,
+                            updated_at = %s
                         WHERE etf_code = %s
                         """,
                         (
@@ -396,6 +398,8 @@ class ETFPoolRepository:
                     )
                     updated += 1
             conn.commit()
+            # 提交分类后，自动基于 MySQL 真实 K 线刷新计算 14 日 Wilder ATR
+            self.refresh_real_atr_from_bars()
             return {"updated": updated, "removed": removed}
         except Exception as exc:
             logger.error("重刷标的池分类失败: %s", exc)
@@ -486,3 +490,73 @@ class ETFPoolRepository:
                 conn.close()
         except Exception:
             return 0
+
+    def refresh_real_atr_from_bars(self) -> int:
+        """基于 etf_daily_bar 中的真实历史 K 线，为 etf_instrument 中的标的重新计算 14 日 Wilder ATR 与弹性等级。"""
+        import pandas as pd
+        from algorithms.atr.calculator import ATRCalculator
+
+        conn = self._connect()
+        calc = ATRCalculator(period=14)
+        updated_count = 0
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT MAX(trade_date) AS max_date FROM etf_daily_bar")
+                row = cursor.fetchone()
+                if not row:
+                    logger.warning("etf_daily_bar 表无数据，跳过真实 ATR 刷新")
+                    return 0
+                max_date = row.get("max_date") if isinstance(row, dict) else row[0]
+                if not max_date:
+                    return 0
+
+                cursor.execute(
+                    """
+                    SELECT etf_code, trade_date AS date, open, high, low, close, vol, amount
+                    FROM etf_daily_bar
+                    WHERE trade_date >= DATE_SUB(%s, INTERVAL 60 DAY)
+                    ORDER BY etf_code, date ASC
+                    """,
+                    (max_date,),
+                )
+                rows = cursor.fetchall()
+                if not rows:
+                    return 0
+
+                df = pd.DataFrame(rows)
+                updates = []
+                for code, group in df.groupby("etf_code"):
+                    if len(group) >= 14:
+                        try:
+                            res = calc.calculate_atr(group.copy())
+                            latest = res.iloc[-1]
+                            real_atr = round(float(latest["atr_pct"]), 2)
+                            if real_atr >= 3.0:
+                                elasticity = "高弹性"
+                            elif real_atr >= 2.0:
+                                elasticity = "稳健型"
+                            else:
+                                elasticity = "低波防守"
+                            updates.append((real_atr, elasticity, code))
+                        except Exception as calc_err:
+                            logger.debug("标的 %s 计算真实 ATR 失败: %s", code, calc_err)
+
+                if updates:
+                    cursor.executemany(
+                        """
+                        UPDATE etf_instrument
+                        SET atr_pct = %s, elasticity = %s
+                        WHERE etf_code = %s
+                        """,
+                        updates,
+                    )
+                    conn.commit()
+                    updated_count = len(updates)
+                    logger.info("✓ 成功基于真实日 K 线刷新 %d 只标的的 14 日 Wilder ATR 与弹性评级", updated_count)
+            return updated_count
+        except Exception as exc:
+            logger.error("刷新真实 ATR 失败: %s", exc)
+            conn.rollback()
+            return 0
+        finally:
+            conn.close()

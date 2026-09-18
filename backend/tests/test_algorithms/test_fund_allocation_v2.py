@@ -21,12 +21,11 @@ class TestFundAllocationV2(unittest.TestCase):
     def test_basic_functionality(self):
         """测试基本功能"""
         total_capital = 100000  # 10万元
-        grid_count = 10
         price_levels = [3.0, 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 4.0]
         current_price = 3.5
         
         result = self.optimizer.calculate_fund_allocation_v2(
-            total_capital, grid_count, price_levels, current_price
+            total_capital, price_levels, current_price
         )
         
         # 验证基本字段存在
@@ -56,7 +55,7 @@ class TestFundAllocationV2(unittest.TestCase):
         current_price = 3.5
         
         result = self.optimizer.calculate_fund_allocation_v2(
-            total_capital, 10, price_levels, current_price
+            total_capital, price_levels, current_price
         )
         
         # 验证底仓与卖出网格匹配
@@ -107,7 +106,7 @@ class TestFundAllocationV2(unittest.TestCase):
         current_price = 3.5
         
         result = self.optimizer.calculate_fund_allocation_v2(
-            total_capital, 2, price_levels, current_price
+            total_capital, price_levels, current_price
         )
         
         self.assertTrue(result['extreme_case_safe'])
@@ -116,7 +115,7 @@ class TestFundAllocationV2(unittest.TestCase):
         # 测试所有价格都高于当前价格（只有卖出网格）
         price_levels = [3.6, 3.7, 3.8, 3.9, 4.0]
         result = self.optimizer.calculate_fund_allocation_v2(
-            total_capital, 4, price_levels, current_price
+            total_capital, price_levels, current_price
         )
         
         # 应该只有底仓，没有买入网格资金
@@ -130,7 +129,7 @@ class TestFundAllocationV2(unittest.TestCase):
         current_price = 12.5
         
         result = self.optimizer.calculate_fund_allocation_v2(
-            total_capital, 10, price_levels, current_price
+            total_capital, price_levels, current_price
         )
         
         # 验证资金安全性
@@ -159,7 +158,7 @@ class TestFundAllocationV2(unittest.TestCase):
         
         # 使用新接口调用
         result_new = self.optimizer.calculate_fund_allocation_v2(
-            total_capital, grid_count, price_levels, base_price
+            total_capital, price_levels, base_price
         )
         
         # 验证输出结构相同
@@ -176,7 +175,7 @@ class TestFundAllocationV2(unittest.TestCase):
         current_price = 5.0
         
         result = self.optimizer.calculate_fund_allocation_v2(
-            total_capital, 10, price_levels, current_price
+            total_capital, price_levels, current_price
         )
         
         # 验证算法详情信息
