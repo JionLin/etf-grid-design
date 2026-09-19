@@ -20,7 +20,11 @@ import {
   Layers,
   Target,
   Info,
+  Coins,
+  Scale,
+  ShieldCheck,
 } from "lucide-react";
+import CrisisReplayModal from "./CrisisReplayModal";
 import { isAbortError, runBacktest } from "@shared/services/api";
 
 function calculateProfitAttribution(summary, profitPool) {
@@ -92,6 +96,9 @@ const BacktestCard = ({
   const [currentPage, setCurrentPage] = useState(1);
   const [anchorMode, setAnchorMode] = useState("auto"); // "auto" | "custom"
   const [customBasePrice, setCustomBasePrice] = useState("");
+  const [hoverIndex, setHoverIndex] = useState(null);
+  const [selectedCrisis, setSelectedCrisis] = useState(null);
+  const [isCrisisModalOpen, setIsCrisisModalOpen] = useState(false);
 
   // 加载回测数据
   const fetchBacktest = async (days, forcedCustomPrice = null, signal) => {
@@ -206,34 +213,49 @@ const BacktestCard = ({
     URL.revokeObjectURL(url);
   };
 
-  // 计算 SVG 净值图表坐标点
+  // 计算 SVG 净值与水下深度图表坐标点
   const chartPoints = useMemo(() => {
     if (!equityCurve || equityCurve.length < 2) return null;
 
     const width = 800;
-    const height = 240;
-    const padding = { top: 20, right: 30, bottom: 30, left: 50 };
+    const height = 220;
+    const uwHeight = 110;
+    const padding = { top: 20, right: 30, bottom: 25, left: 55 };
 
     const innerWidth = width - padding.left - padding.right;
     const innerHeight = height - padding.top - padding.bottom;
+    const uwInnerHeight = uwHeight - padding.top - padding.bottom;
 
-    // 获取净值极值
+    // 1. 获取净值极值
     let minNav = 0.8;
     let maxNav = 1.2;
+
+    // 2. 获取水下深度极值 (负百分比，例如 -26.56%)
+    let minDd = 0.0;
 
     equityCurve.forEach((d) => {
       if (d.strategy_nav < minNav) minNav = d.strategy_nav;
       if (d.strategy_nav > maxNav) maxNav = d.strategy_nav;
       if (d.benchmark_nav < minNav) minNav = d.benchmark_nav;
       if (d.benchmark_nav > maxNav) maxNav = d.benchmark_nav;
+
+      const sDd = Number(d.strategy_dd_pct ?? 0);
+      const bDd = Number(d.benchmark_dd_pct ?? 0);
+      if (sDd < minDd) minDd = sDd;
+      if (bDd < minDd) minDd = bDd;
     });
 
     minNav = Math.floor((minNav - 0.05) * 10) / 10;
     maxNav = Math.ceil((maxNav + 0.05) * 10) / 10;
     const navRange = maxNav - minNav || 1;
 
+    // 水下深度 Y 轴范围：从 0% 向下到 minDd
+    const floorDd = Math.floor((minDd - 2) / 5) * 5;
+    const ddRange = Math.abs(floorDd) || 10;
+
     const getX = (index) => padding.left + (index / (equityCurve.length - 1)) * innerWidth;
     const getY = (nav) => padding.top + innerHeight - ((nav - minNav) / navRange) * innerHeight;
+    const getUwY = (ddPct) => padding.top + (Math.abs(Number(ddPct) || 0) / ddRange) * uwInnerHeight;
 
     const strategyPoints = equityCurve.map((d, i) => `${getX(i)},${getY(d.strategy_nav)}`).join(" ");
     const benchmarkPoints = equityCurve.map((d, i) => `${getX(i)},${getY(d.benchmark_nav)}`).join(" ");
@@ -241,6 +263,13 @@ const BacktestCard = ({
     // 区域填充闭合路径
     const baselineY = getY(minNav);
     const strategyArea = `${padding.left},${baselineY} ` + strategyPoints + ` ${padding.left + innerWidth},${baselineY}`;
+
+    // 水下曲线坐标
+    const strategyUwPoints = equityCurve.map((d, i) => `${getX(i)},${getUwY(d.strategy_dd_pct)}`).join(" ");
+    const benchmarkUwPoints = equityCurve.map((d, i) => `${getX(i)},${getUwY(d.benchmark_dd_pct)}`).join(" ");
+
+    const uwZeroY = getUwY(0);
+    const strategyUwArea = `${padding.left},${uwZeroY} ` + strategyUwPoints + ` ${padding.left + innerWidth},${uwZeroY}`;
 
     // 横轴刻度采样 (取 5 个日期点)
     const xTicks = [];
@@ -258,24 +287,61 @@ const BacktestCard = ({
       });
     }
 
-    // 纵轴刻度采样 (3 个点)
+    // 净值纵轴刻度 (3 个点)
     const yTicks = [
       { y: getY(minNav), label: minNav.toFixed(2) },
       { y: getY((minNav + maxNav) / 2), label: ((minNav + maxNav) / 2).toFixed(2) },
       { y: getY(maxNav), label: maxNav.toFixed(2) },
     ];
 
+    // 水下纵轴刻度 (3 个点)
+    const uwYTicks = [
+      { y: getUwY(0), label: "0%" },
+      { y: getUwY(floorDd / 2), label: `${(floorDd / 2).toFixed(0)}%` },
+      { y: getUwY(floorDd), label: `${floorDd.toFixed(0)}%` },
+    ];
+
     return {
       width,
       height,
+      uwHeight,
       padding,
+      innerWidth,
+      innerHeight,
+      uwInnerHeight,
+      getX,
+      getY,
+      getUwY,
       strategyPoints,
       benchmarkPoints,
       strategyArea,
+      strategyUwPoints,
+      benchmarkUwPoints,
+      strategyUwArea,
       xTicks,
       yTicks,
+      uwYTicks,
     };
   }, [equityCurve]);
+
+  // 鼠标在 SVG 上滑动交互
+  const handleSvgMouseMove = (e) => {
+    if (!chartPoints || !equityCurve.length) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const svgX = (mouseX / rect.width) * chartPoints.width;
+    if (svgX < chartPoints.padding.left || svgX > chartPoints.width - chartPoints.padding.right) {
+      setHoverIndex(null);
+      return;
+    }
+    const ratio = (svgX - chartPoints.padding.left) / (chartPoints.width - chartPoints.padding.left - chartPoints.padding.right);
+    const idx = Math.min(equityCurve.length - 1, Math.max(0, Math.round(ratio * (equityCurve.length - 1))));
+    setHoverIndex(idx);
+  };
+
+  const handleSvgMouseLeave = () => {
+    setHoverIndex(null);
+  };
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-6 shadow-xs space-y-6">
@@ -543,6 +609,78 @@ const BacktestCard = ({
             </div>
           </div>
 
+          {/* 策略韧性与资金画像看板 (Sortino / 最长解套周期 / 资金利用率与安全垫) */}
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-50 via-gray-50/50 to-white border border-gray-200/80 shadow-2xs space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                <span className="text-xs font-bold text-gray-800 tracking-wide">
+                  策略韧性与资金画像 (量化下行风险与资金效率)
+                </span>
+              </div>
+              <span className="text-[11px] text-gray-400">下行风险收益比 & 水下持续周期</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* 1. 索提诺比率 */}
+              <div
+                className="p-3 bg-white rounded-xl border border-gray-100 shadow-2xs"
+                title="Sortino Ratio: 仅以负超额收益计算下行半方差，不惩罚脉冲上涨波动。>1.5为优秀，>2.0为极佳"
+              >
+                <div className="text-[11px] text-gray-500 flex items-center justify-between">
+                  <span>索提诺比率 (Sortino)</span>
+                  <Scale className="w-3.5 h-3.5 text-indigo-500" />
+                </div>
+                <div className="text-xl font-black font-mono text-gray-900 mt-1">
+                  {summary.sortino_ratio != null ? summary.sortino_ratio : "— (无下行方差)"}
+                </div>
+                <div className="text-[10px] text-indigo-600 font-medium mt-0.5">
+                  {summary.sortino_ratio >= 2.0
+                    ? "⭐ 下行性价比极佳"
+                    : summary.sortino_ratio >= 1.0
+                    ? "✓ 风险收益均衡"
+                    : "稳健防守中"}
+                </div>
+              </div>
+
+              {/* 2. 最长水下解套周期 */}
+              <div
+                className="p-3 bg-white rounded-xl border border-gray-100 shadow-2xs"
+                title="历史最大水下周期：从见顶跌破高点到通过震荡做T彻底填平出水经历的日历天数"
+              >
+                <div className="text-[11px] text-gray-500 flex items-center justify-between">
+                  <span>最长解套周期 (水下)</span>
+                  <Clock className="w-3.5 h-3.5 text-rose-500" />
+                </div>
+                <div className="text-xl font-black font-mono text-rose-600 mt-1">
+                  {summary.longest_underwater_days != null
+                    ? `${summary.longest_underwater_days} 天`
+                    : "—"}
+                </div>
+                <div className="text-[10px] text-gray-500 mt-0.5">
+                  最大回撤 {summary.max_drawdown}% 时的历史爬坑修复期
+                </div>
+              </div>
+
+              {/* 3. 平均资金占用与防爆仓垫 */}
+              <div
+                className="p-3 bg-white rounded-xl border border-gray-100 shadow-2xs"
+                title="资金暴露度：持仓常规市值与免费股现值占总资产比例。余量为防暴跌深水补仓流动性底垫"
+              >
+                <div className="text-[11px] text-gray-500 flex items-center justify-between">
+                  <span>资金利用率与安全垫</span>
+                  <Coins className="w-3.5 h-3.5 text-emerald-500" />
+                </div>
+                <div className="text-xl font-black font-mono text-gray-900 mt-1">
+                  均仓 {summary.avg_exposure ?? 50.0}%
+                </div>
+                <div className="text-[10px] text-emerald-700 mt-0.5">
+                  峰值吃刀 {summary.max_exposure ?? 50.0}% (余 {(100 - (summary.max_exposure ?? 50.0)).toFixed(1)}% 防爆仓现金垫)
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* 留利润模式专属：收益穿透桥梁与归因分解 (做T造血 ➔ 滚存股本 ➔ 享受主升浪) */}
           {profitAttribution && (summary?.reinvest_mode || reinvestMode) === "pool_shares" && (
             <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-indigo-50/80 via-blue-50/40 to-white border border-indigo-200 shadow-2xs space-y-3.5">
@@ -734,9 +872,9 @@ const BacktestCard = ({
             </div>
           )}
 
-          {/* 2. 净值时序走势对决图 (轻量 SVG 矢量渲染) */}
-          <div className="border border-gray-200 rounded-xl p-5 bg-white">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          {/* 2. 净值与水下深度双联对决图 (轻量纯 SVG 矢量渲染 + 十字光标联动) */}
+          <div className="border border-gray-200 rounded-xl p-5 bg-white space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h4 className="font-bold text-gray-900 text-sm flex items-center gap-2">
                   <span>策略净值走势对决</span>
@@ -755,80 +893,260 @@ const BacktestCard = ({
               </div>
             </div>
 
-            {chartPoints && (
-              <div className="w-full overflow-x-auto">
-                <svg
-                  viewBox={`0 0 ${chartPoints.width} ${chartPoints.height}`}
-                  className="w-full h-52 select-none"
-                >
-                  <defs>
-                    <linearGradient id="strategyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                      <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.18" />
-                      <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
-                    </linearGradient>
-                  </defs>
+            {/* 十字光标动态探针卡片 */}
+            {hoverIndex !== null && equityCurve[hoverIndex] && (
+              <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2 bg-indigo-50/80 rounded-xl text-xs font-mono border border-indigo-200/70 shadow-2xs animate-in fade-in duration-150">
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-indigo-950">📅 {equityCurve[hoverIndex].date}</span>
+                  <span className="text-gray-300">|</span>
+                  <span className="text-blue-700 font-bold">
+                    策略净值: {equityCurve[hoverIndex].strategy_nav}
+                  </span>
+                  <span className="text-gray-500">
+                    (总资产: ¥{Number(equityCurve[hoverIndex].strategy_equity).toLocaleString()})
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-gray-600">标的: {equityCurve[hoverIndex].benchmark_nav}</span>
+                  <span className="text-rose-600 font-bold">
+                    策略回撤: {equityCurve[hoverIndex].strategy_dd_pct ?? 0}%
+                  </span>
+                  <span className="text-gray-500">
+                    标的回撤: {equityCurve[hoverIndex].benchmark_dd_pct ?? 0}%
+                  </span>
+                  <span className="text-emerald-700 font-medium">
+                    仓位: {((equityCurve[hoverIndex].exposure ?? 0.5) * 100).toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+            )}
 
-                  {/* 背景参考线 */}
-                  {chartPoints.yTicks.map((tick, idx) => (
-                    <g key={idx}>
+            {chartPoints && (
+              <div className="space-y-4">
+                {/* 1. 净值曲线图 */}
+                <div className="w-full overflow-x-auto">
+                  <svg
+                    viewBox={`0 0 ${chartPoints.width} ${chartPoints.height}`}
+                    className="w-full h-48 select-none cursor-crosshair"
+                    onMouseMove={handleSvgMouseMove}
+                    onMouseLeave={handleSvgMouseLeave}
+                  >
+                    <defs>
+                      <linearGradient id="strategyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#3b82f6" stopOpacity="0.18" />
+                        <stop offset="100%" stopColor="#3b82f6" stopOpacity="0.0" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* 背景参考线 */}
+                    {chartPoints.yTicks.map((tick, idx) => (
+                      <g key={idx}>
+                        <line
+                          x1={chartPoints.padding.left}
+                          y1={tick.y}
+                          x2={chartPoints.width - chartPoints.padding.right}
+                          y2={tick.y}
+                          stroke="#f1f5f9"
+                          strokeDasharray="3 3"
+                        />
+                        <text
+                          x={chartPoints.padding.left - 8}
+                          y={tick.y + 4}
+                          fontSize="10"
+                          fill="#94a3b8"
+                          textAnchor="end"
+                          fontFamily="monospace"
+                        >
+                          {tick.label}
+                        </text>
+                      </g>
+                    ))}
+
+                    {/* 策略净值阴影面积 */}
+                    <polygon points={chartPoints.strategyArea} fill="url(#strategyGrad)" />
+
+                    {/* 标的持有走势曲线 (灰色虚线) */}
+                    <polyline
+                      fill="none"
+                      stroke="#94a3b8"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 3"
+                      points={chartPoints.benchmarkPoints}
+                    />
+
+                    {/* 网格策略净值曲线 (蓝色实线) */}
+                    <polyline
+                      fill="none"
+                      stroke="#2563eb"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      points={chartPoints.strategyPoints}
+                    />
+
+                    {/* 十字光标竖线 */}
+                    {hoverIndex !== null && (
+                      <line
+                        x1={chartPoints.getX(hoverIndex)}
+                        y1={chartPoints.padding.top}
+                        x2={chartPoints.getX(hoverIndex)}
+                        y2={chartPoints.height - chartPoints.padding.bottom}
+                        stroke="#6366f1"
+                        strokeWidth="1.2"
+                        strokeDasharray="3 2"
+                      />
+                    )}
+                  </svg>
+                </div>
+
+                {/* 2. 水下深度与回撤全景图 */}
+                <div className="pt-2 border-t border-gray-100 space-y-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-gray-800 flex items-center gap-1">
+                        <span>🌊 水下深度与解套全景</span>
+                        <span className="text-[10px] text-gray-500 font-normal font-sans">(0% 轴朝下染色)</span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <span className="w-2.5 h-2.5 bg-rose-400/50 border border-rose-500 rounded-2xs inline-block"></span>
+                        <span>网格水下深度</span>
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="w-3 h-0.5 border-t border-dashed border-gray-400 inline-block"></span>
+                        <span>标的水下轮廓</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="w-full overflow-x-auto">
+                    <svg
+                      viewBox={`0 0 ${chartPoints.width} ${chartPoints.uwHeight}`}
+                      className="w-full h-28 select-none cursor-crosshair"
+                      onMouseMove={handleSvgMouseMove}
+                      onMouseLeave={handleSvgMouseLeave}
+                    >
+                      <defs>
+                        <linearGradient id="underwaterGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.10" />
+                          <stop offset="100%" stopColor="#e11d48" stopOpacity="0.45" />
+                        </linearGradient>
+                      </defs>
+
+                      {/* 水下 Y 刻度与参考线 */}
+                      {chartPoints.uwYTicks.map((tick, idx) => (
+                        <g key={idx}>
+                          <line
+                            x1={chartPoints.padding.left}
+                            y1={tick.y}
+                            x2={chartPoints.width - chartPoints.padding.right}
+                            y2={tick.y}
+                            stroke="#f1f5f9"
+                            strokeDasharray="2 2"
+                          />
+                          <text
+                            x={chartPoints.padding.left - 8}
+                            y={tick.y + 4}
+                            fontSize="9"
+                            fill="#94a3b8"
+                            textAnchor="end"
+                            fontFamily="monospace"
+                          >
+                            {tick.label}
+                          </text>
+                        </g>
+                      ))}
+
+                      {/* 0% 顶峰基准线 */}
                       <line
                         x1={chartPoints.padding.left}
-                        y1={tick.y}
+                        y1={chartPoints.getUwY(0)}
                         x2={chartPoints.width - chartPoints.padding.right}
-                        y2={tick.y}
-                        stroke="#f1f5f9"
-                        strokeDasharray="3 3"
+                        y2={chartPoints.getUwY(0)}
+                        stroke="#cbd5e1"
+                        strokeWidth="1"
                       />
-                      <text
-                        x={chartPoints.padding.left - 8}
-                        y={tick.y + 4}
-                        fontSize="10"
-                        fill="#94a3b8"
-                        textAnchor="end"
-                        fontFamily="monospace"
+
+                      {/* 水下时间横轴刻度 */}
+                      {chartPoints.xTicks.map((tick, idx) => (
+                        <text
+                          key={idx}
+                          x={tick.x}
+                          y={chartPoints.uwHeight - 4}
+                          fontSize="9"
+                          fill="#94a3b8"
+                          textAnchor="middle"
+                          fontFamily="monospace"
+                        >
+                          {tick.label}
+                        </text>
+                      ))}
+
+                      {/* 网格水下深度面积 */}
+                      <polygon points={chartPoints.strategyUwArea} fill="url(#underwaterGrad)" />
+
+                      {/* 标的水下虚线轮廓 */}
+                      <polyline
+                        fill="none"
+                        stroke="#94a3b8"
+                        strokeWidth="1.2"
+                        strokeDasharray="3 2"
+                        points={chartPoints.benchmarkUwPoints}
+                      />
+
+                      {/* 网格水下前沿实线 */}
+                      <polyline
+                        fill="none"
+                        stroke="#e11d48"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        points={chartPoints.strategyUwPoints}
+                      />
+
+                      {/* 十字光标竖线 */}
+                      {hoverIndex !== null && (
+                        <line
+                          x1={chartPoints.getX(hoverIndex)}
+                          y1={chartPoints.padding.top}
+                          x2={chartPoints.getX(hoverIndex)}
+                          y2={chartPoints.uwHeight - chartPoints.padding.bottom}
+                          stroke="#6366f1"
+                          strokeWidth="1.2"
+                          strokeDasharray="3 2"
+                        />
+                      )}
+                    </svg>
+                  </div>
+                </div>
+
+                {/* 3. 历史重大回撤危机复盘快捷诊断入口 */}
+                {summary.top_drawdown_spells && summary.top_drawdown_spells.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-gray-100">
+                    <span className="text-[11px] font-bold text-gray-600 flex items-center gap-1">
+                      <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
+                      <span>重大危机复盘诊断:</span>
+                    </span>
+                    {summary.top_drawdown_spells.map((spell, sIdx) => (
+                      <button
+                        key={sIdx}
+                        type="button"
+                        onClick={() => {
+                          setSelectedCrisis(spell);
+                          setIsCrisisModalOpen(true);
+                        }}
+                        className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-xs font-mono font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                        title="点击展开该次危机中网格倒金字塔加码低吸与做T差价现金流复盘"
                       >
-                        {tick.label}
-                      </text>
-                    </g>
-                  ))}
-
-                  {/* 时间横轴 */}
-                  {chartPoints.xTicks.map((tick, idx) => (
-                    <text
-                      key={idx}
-                      x={tick.x}
-                      y={chartPoints.height - 8}
-                      fontSize="10"
-                      fill="#94a3b8"
-                      textAnchor="middle"
-                      fontFamily="monospace"
-                    >
-                      {tick.label}
-                    </text>
-                  ))}
-
-                  {/* 策略净值阴影面积 */}
-                  <polygon points={chartPoints.strategyArea} fill="url(#strategyGrad)" />
-
-                  {/* 标的持有走势曲线 (灰色虚线) */}
-                  <polyline
-                    fill="none"
-                    stroke="#94a3b8"
-                    strokeWidth="1.5"
-                    strokeDasharray="4 3"
-                    points={chartPoints.benchmarkPoints}
-                  />
-
-                  {/* 网格策略净值曲线 (蓝色实线) */}
-                  <polyline
-                    fill="none"
-                    stroke="#2563eb"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    points={chartPoints.strategyPoints}
-                  />
-                </svg>
+                        <span>
+                          #{spell.rank} 回撤 -{Math.abs(spell.max_dd_pct)}% ({spell.peak_date} ~ {spell.recovered_date || "至今"})
+                        </span>
+                        <span className="text-[10px] text-rose-600 underline font-sans">复盘 ➔</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1102,6 +1420,15 @@ const BacktestCard = ({
         </>
         );
       })()}
+
+      {/* 历史重大危机复盘诊断弹窗 */}
+      <CrisisReplayModal
+        isOpen={isCrisisModalOpen}
+        onClose={() => setIsCrisisModalOpen(false)}
+        crisisData={selectedCrisis}
+        etfCode={etfCode}
+        etfName={summary?.etf_name || etfCode}
+      />
     </div>
   );
 };

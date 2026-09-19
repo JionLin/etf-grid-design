@@ -6,9 +6,154 @@
 import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_sortino_ratio(
+    equity_curve: List[Dict[str, Any]], rf: float = 0.02, periods: int = 250
+) -> Optional[float]:
+    """
+    计算年化索提诺比率 (Sortino Ratio)
+    仅对下行负超额收益进行半方差惩罚，真实反映策略在下行风险中的获利性价比
+    """
+    if not equity_curve or len(equity_curve) < 2:
+        return None
+
+    equities = np.array([d["strategy_equity"] for d in equity_curve], dtype=float)
+    if np.any(equities <= 0):
+        return None
+
+    # 日收益率序列
+    daily_returns = (equities[1:] - equities[:-1]) / equities[:-1]
+    rf_daily = rf / periods
+    excess_returns = daily_returns - rf_daily
+
+    # 仅统计下行负超额收益
+    downside_diff = np.minimum(excess_returns, 0.0)
+    downside_deviation = np.sqrt(np.mean(downside_diff ** 2))
+
+    if downside_deviation <= 1e-8:
+        return None
+
+    mean_excess = np.mean(excess_returns)
+    sortino = (mean_excess / downside_deviation) * np.sqrt(periods)
+    return round(float(sortino), 2)
+
+
+def calculate_exposure_metrics(equity_curve: List[Dict[str, Any]]) -> Dict[str, float]:
+    """计算全周期平均资金利用率 (均仓) 与峰值吃刀仓位暴露度"""
+    if not equity_curve:
+        return {"avg_exposure": 50.0, "max_exposure": 50.0}
+
+    exposures = [d.get("exposure", 0.0) for d in equity_curve]
+    avg_exp = round(float(np.mean(exposures)) * 100, 1)
+    max_exp = round(float(np.max(exposures)) * 100, 1)
+    return {"avg_exposure": avg_exp, "max_exposure": max_exp}
+
+
+def extract_drawdown_spells(
+    equity_curve: List[Dict[str, Any]], trades: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    利用高水位状态机扫描完整水下周期，提取最长解套日历天数与历史浮亏最严重的 Top 3 危机切片
+    """
+    if not equity_curve or len(equity_curve) < 2:
+        return {"longest_underwater_days": 0, "top_drawdown_spells": []}
+
+    equities = [d["strategy_equity"] for d in equity_curve]
+    dates = [pd.to_datetime(d["date"]) for d in equity_curve]
+
+    peak_val = equities[0]
+    peak_date = dates[0]
+    spells = []
+    current_spell = None
+
+    for i in range(len(equities)):
+        eq = equities[i]
+        cur_date = dates[i]
+
+        if eq >= peak_val:
+            if current_spell is not None:
+                # 净值打破前期高点，该次水下周期彻底解套！
+                current_spell["recovered_date"] = cur_date.strftime("%Y-%m-%d")
+                current_spell["is_recovered"] = True
+                current_spell["underwater_days"] = max(1, (cur_date - current_spell["peak_dt"]).days)
+                current_spell["recovery_days"] = max(0, (cur_date - current_spell["trough_dt"]).days)
+                spells.append(current_spell)
+                current_spell = None
+            peak_val = eq
+            peak_date = cur_date
+        else:
+            # 跌入水下浮亏状态
+            dd = (peak_val - eq) / peak_val
+            if current_spell is None:
+                current_spell = {
+                    "peak_date": peak_date.strftime("%Y-%m-%d"),
+                    "peak_dt": peak_date,
+                    "start_date": cur_date.strftime("%Y-%m-%d"),
+                    "start_dt": cur_date,
+                    "max_dd": dd,
+                    "trough_date": cur_date.strftime("%Y-%m-%d"),
+                    "trough_dt": cur_date,
+                    "trough_equity": eq,
+                    "is_recovered": False,
+                }
+            else:
+                if dd > current_spell["max_dd"]:
+                    current_spell["max_dd"] = dd
+                    current_spell["trough_date"] = cur_date.strftime("%Y-%m-%d")
+                    current_spell["trough_dt"] = cur_date
+                    current_spell["trough_equity"] = eq
+
+    # 如果到回测结束日仍未解套 (当前仍处于水下状态)
+    if current_spell is not None:
+        current_spell["recovered_date"] = None
+        current_spell["is_recovered"] = False
+        current_spell["underwater_days"] = max(1, (dates[-1] - current_spell["peak_dt"]).days)
+        current_spell["recovery_days"] = max(0, (dates[-1] - current_spell["trough_dt"]).days)
+        spells.append(current_spell)
+
+    longest_underwater_days = max([s["underwater_days"] for s in spells]) if spells else 0
+
+    # 按回撤深度降序排列，取 Top 3 危机切片
+    sorted_spells = sorted(spells, key=lambda x: x["max_dd"], reverse=True)[:3]
+
+    top_drawdown_spells = []
+    for idx, sp in enumerate(sorted_spells):
+        s_date_str = sp["start_date"]
+        e_date_str = sp["recovered_date"] if sp["recovered_date"] else dates[-1].strftime("%Y-%m-%d")
+
+        # 统计该次危机区间内网格做 T 自愈行为贡献
+        spell_trades = [
+            t for t in trades if s_date_str <= str(t.get("trade_time", ""))[:10] <= e_date_str
+        ]
+        buy_trades = [t for t in spell_trades if t.get("action") == "BUY"]
+        sell_trades = [t for t in spell_trades if t.get("action") == "SELL"]
+        t_profit = sum(float(t.get("profit", 0.0)) for t in sell_trades)
+
+        top_drawdown_spells.append({
+            "rank": idx + 1,
+            "max_dd_pct": round(float(sp["max_dd"]) * 100, 2),
+            "peak_date": sp["peak_date"],
+            "start_date": sp["start_date"],
+            "trough_date": sp["trough_date"],
+            "recovered_date": sp["recovered_date"],
+            "is_recovered": sp["is_recovered"],
+            "underwater_days": sp["underwater_days"],
+            "fall_days": max(0, (sp["trough_dt"] - sp["start_dt"]).days),
+            "recovery_days": sp["recovery_days"],
+            "buy_count": len(buy_trades),
+            "buy_amount": round(sum(float(t.get("amount", 0.0)) for t in buy_trades), 2),
+            "t_profit": round(t_profit, 2),
+        })
+
+    return {
+        "longest_underwater_days": longest_underwater_days,
+        "top_drawdown_spells": top_drawdown_spells,
+    }
 
 
 @dataclass
@@ -226,6 +371,7 @@ class GridBacktestEngine:
 
         # 最大回撤从首个净值点起算（peak 初始为 0，而非初始本金，避免首日建仓浮亏被误计入回撤）
         peak_equity = 0.0
+        peak_benchmark = 0.0
         max_drawdown = 0.0
         total_commission = 0.0
 
@@ -401,6 +547,14 @@ class GridBacktestEngine:
             if dd > max_drawdown:
                 max_drawdown = dd
 
+            if benchmark_equity > peak_benchmark:
+                peak_benchmark = benchmark_equity
+            bench_dd = (peak_benchmark - benchmark_equity) / peak_benchmark if peak_benchmark > 0 else 0.0
+
+            pos_val = round(regular_shares * close_price, 2)
+            total_invested_val = pos_val + (free_shares_val if reinvest_mode == "pool_shares" else 0.0)
+            exposure = round(total_invested_val / current_equity, 4) if current_equity > 0 else 0.0
+
             equity_curve.append({
                 "date": date_str,
                 "strategy_equity": current_equity,
@@ -412,7 +566,10 @@ class GridBacktestEngine:
                 "free_shares": free_shares,
                 "free_shares_value": free_shares_val,
                 "profit_pool": pool_val,
-                "position_value": round(regular_shares * close_price, 2),
+                "position_value": pos_val,
+                "strategy_dd_pct": round(-dd * 100, 2),
+                "benchmark_dd_pct": round(-bench_dd * 100, 2),
+                "exposure": exposure,
             })
 
         # 3. 绩效关键指标统计
@@ -469,6 +626,11 @@ class GridBacktestEngine:
                 "profit_ratio": pct,
             })
 
+        # 5. 策略韧性、水下周期与资金暴露指标
+        sortino = calculate_sortino_ratio(equity_curve)
+        exposure_stats = calculate_exposure_metrics(equity_curve)
+        spell_stats = extract_drawdown_spells(equity_curve, trades)
+
         return {
             "summary": {
                 "initial_capital": round(initial_capital, 2),
@@ -477,6 +639,11 @@ class GridBacktestEngine:
                 "benchmark_return": benchmark_return,
                 "alpha": alpha,
                 "max_drawdown": round(max_drawdown * 100, 2),
+                "sortino_ratio": sortino,
+                "longest_underwater_days": spell_stats["longest_underwater_days"],
+                "avg_exposure": exposure_stats["avg_exposure"],
+                "max_exposure": exposure_stats["max_exposure"],
+                "top_drawdown_spells": spell_stats["top_drawdown_spells"],
                 "win_rate": win_rate,
                 "total_trades_count": total_trades_count,
                 "sell_trades_count": sell_count,

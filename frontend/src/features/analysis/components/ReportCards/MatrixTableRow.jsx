@@ -65,6 +65,7 @@ const MatrixTableRow = React.memo(function MatrixTableRow({
 }) {
   const p = item.periods || {};
   const freeShares5y = p["5y"]?.free_shares;
+  const longestUnderwater5y = p["5y"]?.longest_underwater_days;
 
   return (
     <tr className="hover:bg-indigo-50/30 transition-colors">
@@ -103,11 +104,21 @@ const MatrixTableRow = React.memo(function MatrixTableRow({
       <td className="py-2 px-3 bg-indigo-50/20 text-right">
         <div className="flex flex-col items-end">
           <ReturnBadge periodObj={p["5y"]} yieldDisplayMode={yieldDisplayMode} />
-          {freeShares5y > 0 && (
-            <span className="text-[10px] text-amber-700 font-medium">
-              🪙 留存 {freeShares5y.toLocaleString()} 股
-            </span>
-          )}
+          <div className="flex items-center gap-1.5 mt-0.5 text-[10px] font-medium font-mono">
+            {freeShares5y > 0 && (
+              <span className="text-amber-700" title={`5年累计留存 ${freeShares5y.toLocaleString()} 股 0 成本筹码`}>
+                🪙 {freeShares5y >= 10000 ? `${(freeShares5y / 10000).toFixed(1)}w` : freeShares5y}股
+              </span>
+            )}
+            {longestUnderwater5y > 0 && (
+              <span
+                className="text-blue-600 bg-blue-50/80 dark:bg-blue-950/40 px-1 py-0.2 rounded"
+                title={`5年回测历史最大水下周期历时 ${longestUnderwater5y} 天后彻底填平创出新高`}
+              >
+                🌊 {longestUnderwater5y}天
+              </span>
+            )}
+          </div>
         </div>
       </td>
       <td className="py-2 px-3 text-center font-sans">

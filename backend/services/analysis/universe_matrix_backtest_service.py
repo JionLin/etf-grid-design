@@ -212,6 +212,7 @@ class UniverseMatrixBacktestService:
                 calmar = round(ann_return / mdd, 2) if mdd > 0 else (ann_return if ann_return > 0 else 0.0)
                 t_count = int(summary.get("total_trades_count", 0) or 0)
                 free_sh = int(profit_pool.get("free_shares", 0) or 0)
+                longest_underwater = summary.get("longest_underwater_days")
 
                 period_results[key] = {
                     "is_valid": True,
@@ -222,6 +223,7 @@ class UniverseMatrixBacktestService:
                     "calmar_ratio": calmar,
                     "trade_count": t_count,
                     "free_shares": free_sh,
+                    "longest_underwater_days": longest_underwater,
                     "base_price": round(p0, 3),
                     "latest_price": round(latest_p, 3),
                     "actual_days": slice_len,
