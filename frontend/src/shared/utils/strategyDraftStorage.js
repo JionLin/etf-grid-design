@@ -36,8 +36,8 @@ export const DEFAULT_STRATEGY_PARAMS = {
   edaSteps: { small: 5, medium: 15, large: 30 },
   atrMultipliers: { small: 0.6, medium: 1.2, large: 2.5 },
   reinvestMode: "pool_shares",
-  scalingRatio: 0.0,
-  enableScaling: false,
+  scalingRatio: 0.1,
+  enableScaling: true,
 };
 
 export const SYSTEM_PRESETS = [

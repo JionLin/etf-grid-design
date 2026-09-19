@@ -11,9 +11,9 @@ import AdjustmentCoefficientSlider from "../../AdjustmentCoefficientSlider";
 const AdvancedStrategySection = memo(function AdvancedStrategySection({
   reinvestMode = "pool_shares",
   onReinvestModeChange,
-  scalingRatio = 0.0,
+  scalingRatio = 0.1,
   onScalingRatioChange,
-  enableScaling = false,
+  enableScaling = true,
   onEnableScalingChange,
   analysisDays = 180,
   onAnalysisDaysChange,

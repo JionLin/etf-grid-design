@@ -34,8 +34,8 @@ const ParameterFormContainer = forwardRef(function ParameterFormContainer(
   const [adjustmentCoefficient, setAdjustmentCoefficient] = usePersistedState("adjustmentCoefficient", initialValues?.adjustmentCoefficient || 1.0);
   const [analysisDays, setAnalysisDays] = usePersistedState("analysisDays", initialValues?.analysisDays || 180);
   const [reinvestMode, setReinvestMode] = usePersistedState("reinvestMode", initialValues?.reinvestMode || "pool_shares");
-  const [scalingRatio, setScalingRatio] = usePersistedState("scalingRatio", initialValues?.scalingRatio !== undefined ? Number(initialValues.scalingRatio) : 0.0);
-  const [enableScaling, setEnableScaling] = useState(Number(scalingRatio) > 0);
+  const [scalingRatio, setScalingRatio] = usePersistedState("scalingRatio", initialValues?.scalingRatio !== undefined ? Number(initialValues.scalingRatio) : 0.1);
+  const [enableScaling, setEnableScaling] = useState(initialValues?.enableScaling !== undefined ? Boolean(initialValues.enableScaling) : Number(scalingRatio) > 0);
   const [stepMode, setStepMode] = usePersistedState("stepMode", initialValues?.stepMode || "atr");
   const [edaSteps, setEdaSteps] = usePersistedState("edaSteps", initialValues?.edaSteps || { small: 5, medium: 15, large: 30 });
   const [atrMultipliers, setAtrMultipliers] = usePersistedState("atrMultipliers", initialValues?.atrMultipliers || { small: 0.6, medium: 1.2, large: 2.5 });

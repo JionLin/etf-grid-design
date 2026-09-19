@@ -55,6 +55,15 @@ def create_app():
     # 注册路由
     register_routes(app)
     
+    # 启动后台数据新鲜度自检与增量自愈守护线程 (测试环境除外)
+    if FLASK_ENV != 'testing' and not os.environ.get('PYTEST_CURRENT_TEST'):
+        try:
+            from services.data.startup_sync_service import StartupSyncService
+            sync_service = StartupSyncService()
+            sync_service.start_in_background(delay_seconds=3.0)
+        except Exception as ex:
+            app.logger.warning(f"启动后台数据自检守护线程失败 (非阻塞): {ex}")
+    
     # 只在生产环境添加静态文件路由
     if FLASK_ENV == 'production':
         setup_static_routes(app)

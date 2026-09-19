@@ -75,7 +75,7 @@ const BacktestCard = ({
   totalCapital = 30000,
   initialDays = 180,
   reinvestMode = "pool_shares",
-  scalingRatio = 0.0,
+  scalingRatio = 0.1,
   stepMode = "atr",
   edaStepRatios = null,
   edaSteps = null,
@@ -469,7 +469,14 @@ const BacktestCard = ({
             {/* 2. 策略折算年化收益率 (新增！与多周期天梯大宽表 100% 对齐) */}
             <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-50/80 to-white border border-indigo-100">
               <div className="text-xs text-gray-500 flex items-center justify-between mb-1">
-                <span>策略折算年化收益率</span>
+                <span className="flex items-center gap-1.5">
+                  <span>策略折算年化收益率</span>
+                  {(summary?.reinvest_mode || reinvestMode) === "cash" && (
+                    <span className="text-[10px] text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded font-sans font-medium" title="当前为落袋全现金模式，天梯榜基准采用模式B留股">
+                      全现金
+                    </span>
+                  )}
+                </span>
                 <TrendingUp className="w-3.5 h-3.5 text-indigo-600" />
               </div>
               <div className={`text-2xl font-black font-mono ${annualizedReturn >= 0 ? "text-red-600" : "text-green-600"}`}>
@@ -478,6 +485,11 @@ const BacktestCard = ({
               <div className="text-[11px] text-indigo-600 mt-1 font-medium truncate">
                 跨度: {summary.backtest_days}交易日 ({calDays}天)
               </div>
+              {(summary?.reinvest_mode || reinvestMode) === "cash" && (
+                <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 font-sans truncate" title="当前为全现金模式，若切换为模式B留利润，细碎差价将转增为0成本股票随标的复利增值，天梯大宽表基准采用模式B">
+                  💡 当前为留现金模式（天梯榜基准为留股）
+                </div>
+              )}
             </div>
 
             {/* 3. 标的基准收益 */}

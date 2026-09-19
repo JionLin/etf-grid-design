@@ -37,3 +37,15 @@ def get_version():
             'timestamp': datetime.now().isoformat()
         }
     })
+
+
+@health_bp.route('/api/system/sync-status', methods=['GET'])
+def get_sync_status():
+    """获取系统启动增量同步与矩阵刷新状态"""
+    from services.data.startup_sync_service import StartupSyncService
+    service = StartupSyncService()
+    status = service.get_status()
+    return jsonify({
+        'success': True,
+        'data': status
+    })

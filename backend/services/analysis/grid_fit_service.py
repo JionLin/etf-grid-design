@@ -1,6 +1,7 @@
 """网格适合度榜：协议评估、独立存储与补齐任务。不写入个人回测档案。"""
 import inspect
 import logging
+import os
 import threading
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -17,7 +18,7 @@ FULL_SAMPLE_FLOOR_DAYS = 1800  # 容忍 A 股因周末与节假日休市产生�
 SHORT_SAMPLE_FLOOR_DAYS = 1095
 ATR_SELL_FLOOR = 12
 EDA_SELL_FLOOR = 2
-DRAWDOWN_CEILING = 35.0
+DRAWDOWN_CEILING = float(os.environ.get("DRAWDOWN_CEILING", 35.0))
 DEFAULT_EDA_RATIOS = {"small": 0.05, "medium": 0.15, "large": 0.30}
 DEFAULT_ATR_MULTIPLIERS = {"small": 0.6, "medium": 1.2, "large": 2.5}
 CASH_NAME_KEYWORDS = ("货币", "日利", "添益", "快钱", "快线", "财富宝")

@@ -11,7 +11,9 @@ import {
   Award,
   BarChart3,
   FileSpreadsheet,
+  HelpCircle,
 } from "lucide-react";
+import MethodologyModal from "./MethodologyModal";
 import {
   getBacktestRecords,
   getBacktestRecordDetail,
@@ -37,6 +39,7 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
 
   // 提示信息
   const [appliedNotice, setAppliedNotice] = useState(null);
+  const [showMethodologyModal, setShowMethodologyModal] = useState(false);
 
   // ================= 1. 矩阵看板状态 =================
   const [matrixLoading, setMatrixLoading] = useState(false);
@@ -423,6 +426,27 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
       {/* ========================================================================= */}
       {activeView === "matrix" && (
         <div className="space-y-4">
+          {/* 常驻评测基准与口径说明横幅 */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-3.5 py-2.5 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/50 rounded-xl text-xs">
+            <div className="flex flex-wrap items-center gap-2 text-indigo-950 dark:text-indigo-200">
+              <span className="flex items-center gap-1 font-bold text-indigo-700 dark:text-indigo-400 shrink-0">
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>评测基准:</span>
+              </span>
+              <span className="text-gray-700 dark:text-gray-300">
+                本金 3w · 180d动态ATR · 模式B留免费股 · 倒金字塔加码10% · 首日真实开盘价P0
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowMethodologyModal(true)}
+              className="flex items-center gap-1 text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 font-semibold hover:underline shrink-0 self-start sm:self-auto cursor-pointer"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>收益算法与口径说明</span>
+            </button>
+          </div>
+
           {/* 筛选与检索控制条 */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2.5 bg-gray-50/70 p-3 rounded-xl border border-gray-100 text-xs items-center">
             {/* 搜索 */}
@@ -569,13 +593,41 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
                       <th className="py-2.5 px-3 w-20">代码</th>
                       <th className="py-2.5 px-3 w-36">标的简称</th>
                       <th className="py-2.5 px-3 w-24">赛道</th>
-                      <th className="py-2.5 px-3 text-right">90天 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
-                      <th className="py-2.5 px-3 text-right">半年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
-                      <th className="py-2.5 px-3 text-right">1年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
-                      <th className="py-2.5 px-3 text-right">2年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
-                      <th className="py-2.5 px-3 text-right">3年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</th>
-                      <th className="py-2.5 px-3 text-right bg-indigo-50/30 text-indigo-950 font-bold">
-                        5年 ({yieldDisplayMode === 'total' ? '累计' : '年化'}) / 留存股
+                      <th className="py-2.5 px-3 text-right group cursor-help" title={yieldDisplayMode === 'total' ? "策略累计总收益率 = (期末总资产 - 初始本金) / 初始本金" : "90天折算年化 = 累计总收益 × (365 / 自然日历天数)"}>
+                        <div className="inline-flex items-center gap-1 justify-end">
+                          <span>90天 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</span>
+                          <HelpCircle className="w-3 h-3 text-gray-400" />
+                        </div>
+                      </th>
+                      <th className="py-2.5 px-3 text-right group cursor-help" title={yieldDisplayMode === 'total' ? "策略累计总收益率 = (期末总资产 - 初始本金) / 初始本金" : "半年折算年化 = 累计总收益 × (365 / 自然日历天数)"}>
+                        <div className="inline-flex items-center gap-1 justify-end">
+                          <span>半年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</span>
+                          <HelpCircle className="w-3 h-3 text-gray-400" />
+                        </div>
+                      </th>
+                      <th className="py-2.5 px-3 text-right group cursor-help" title={yieldDisplayMode === 'total' ? "策略累计总收益率 = (期末总资产 - 初始本金) / 初始本金" : "1年折算年化 = 累计总收益 × (365 / 自然日历天数)"}>
+                        <div className="inline-flex items-center gap-1 justify-end">
+                          <span>1年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</span>
+                          <HelpCircle className="w-3 h-3 text-gray-400" />
+                        </div>
+                      </th>
+                      <th className="py-2.5 px-3 text-right group cursor-help" title={yieldDisplayMode === 'total' ? "策略累计总收益率 = (期末总资产 - 初始本金) / 初始本金" : "2年折算年化 = 累计总收益 × (365 / 自然日历天数)"}>
+                        <div className="inline-flex items-center gap-1 justify-end">
+                          <span>2年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</span>
+                          <HelpCircle className="w-3 h-3 text-gray-400" />
+                        </div>
+                      </th>
+                      <th className="py-2.5 px-3 text-right group cursor-help" title={yieldDisplayMode === 'total' ? "策略累计总收益率 = (期末总资产 - 初始本金) / 初始本金" : "3年折算年化 = 累计总收益 × (365 / 自然日历天数)"}>
+                        <div className="inline-flex items-center gap-1 justify-end">
+                          <span>3年 ({yieldDisplayMode === 'total' ? '累计' : '年化'})</span>
+                          <HelpCircle className="w-3 h-3 text-gray-400" />
+                        </div>
+                      </th>
+                      <th className="py-2.5 px-3 text-right bg-indigo-50/30 text-indigo-950 font-bold group cursor-help" title={yieldDisplayMode === 'total' ? "累计总收益率 = (期末总资产 - 初始本金) / 初始本金，含0成本免费股票现值" : "5年折算年化 = 累计总收益 × (365 / 自然日历天数)，含0成本免费股票现值"}>
+                        <div className="inline-flex items-center gap-1 justify-end">
+                          <span>5年 ({yieldDisplayMode === 'total' ? '累计' : '年化'}) / 留存股</span>
+                          <HelpCircle className="w-3 h-3 text-indigo-500" />
+                        </div>
                       </th>
                       <th className="py-2.5 px-3 w-28 text-center">快捷操作</th>
                     </tr>
@@ -1011,6 +1063,11 @@ export default function BacktestArchiveView({ onApplyParams, isEmbedded = false 
           )}
         </div>
       )}
+      {/* 算法口径与评测说明弹窗 */}
+      <MethodologyModal
+        isOpen={showMethodologyModal}
+        onClose={() => setShowMethodologyModal(false)}
+      />
     </div>
   );
 }

@@ -51,7 +51,8 @@ export default function QuickConfigPanel({
       etfCode: code,
       totalCapital: capital,
       stepMode,
-      reinvestMode,
+      reinvestMode: reinvestMode || "pool_shares",
+      scalingRatio: 0.1, // 与回测矩阵倒金字塔加码 10% 对齐
       gridType: "等比",
       riskPreference: "均衡",
       adjustmentCoefficient: 1.0,

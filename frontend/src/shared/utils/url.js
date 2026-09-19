@@ -2,7 +2,7 @@
  * URL参数管理工具
  * 处理分析页面的URL参数编码、解码和验证
  */
-import { validateETFCode } from "./validation";
+import { validateETFCode } from "./validation.js";
 
 // 参数映射表 - 中文到英文的映射
 export const PARAM_MAPPINGS = {
@@ -38,7 +38,7 @@ export const DEFAULT_PARAMS = {
   adjustment: "1.0", // 调节系数默认值
   stepMode: "atr", // 步长生成模式：'atr' | 'fixed_eda'
   days: "180", // 历史分析周期：90 | 180 | 365
-  scaling: "0.0", // 逐格加码比例：0.0 ~ 0.20
+  scaling: "0.1", // 逐格加码比例：默认 0.1 (10% 倒金字塔加码)
   reinvest: "pool_shares", // 做T收益留存模式：'pool_shares' | 'cash'
   edaSteps: "5,15,30", // E大原版自定义各轨步长比例：默认 5,15,30
   atrMultipliers: "0.6,1.2,2.5", // ATR自适应自定义各轨乘数：默认 0.6,1.2,2.5

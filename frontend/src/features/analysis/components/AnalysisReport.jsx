@@ -102,7 +102,7 @@ const AnalysisReport = ({
     totalCapital: userTotalCapital,
     analysisDays: Number(inputParameters?.analysis_days || inputParameters?.analysisDays || 180),
     reinvestMode: inputParameters?.reinvest_mode || inputParameters?.reinvestMode || "pool_shares",
-    scalingRatio: Number(inputParameters?.scaling_ratio ?? inputParameters?.scalingRatio ?? 0.0),
+    scalingRatio: Number(inputParameters?.scaling_ratio ?? inputParameters?.scalingRatio ?? 0.1),
     stepMode: inputParameters?.step_mode || inputParameters?.stepMode || "atr",
     edaStepRatios: inputParameters?.eda_step_ratios || inputParameters?.edaStepRatios || null,
     edaSteps: inputParameters?.edaSteps || null,
