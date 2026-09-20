@@ -62,12 +62,15 @@ def test_extract_drawdown_spells():
 
     res = extract_drawdown_spells(curve, trades)
     assert "longest_underwater_days" in res
+    assert "max_dd_recovery_days" in res
     assert "top_drawdown_spells" in res
     assert res["longest_underwater_days"] >= 3
+    assert res["max_dd_recovery_days"] >= 3
 
     spells = res["top_drawdown_spells"]
     assert len(spells) >= 1
     top1 = spells[0]
+    assert top1["spell_type"] == "deepest_crisis"
     assert top1["peak_date"] == "2023-01-02"
     assert top1["trough_date"] == "2023-01-03"
     assert top1["recovered_date"] == "2023-01-05"

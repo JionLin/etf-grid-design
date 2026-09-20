@@ -138,9 +138,49 @@ export default function MethodologyModal({ isOpen, onClose }) {
               <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 space-y-1">
                 <span className="font-bold text-gray-900 dark:text-gray-100">② 策略折算年化收益率 (Annualized Return)</span>
                 <p className="font-mono text-[11px] text-gray-600 dark:text-gray-300">
-                  折算年化 = 累计总收益率 × (365 / 该周期自然日历天数)
+                  折算年化 = 累计总收益率 × (365 / 实际日历跨度天数)
                 </p>
-                <p className="text-[11px] text-gray-400">采用公募基金行业通用的单利年化时间权重归一化标准。</p>
+                <p className="text-[11px] text-gray-400">时间归一化单利公式，消除不同标的自然日跨度差异，保证全市场可比性。</p>
+              </div>
+            </div>
+          </div>
+
+          {/* 4. 索提诺比率与水下韧性全解 (给小白的量化真相) */}
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2 text-xs font-bold text-gray-900 dark:text-gray-100">
+              <ShieldCheck className="w-4 h-4 text-purple-600" />
+              <span>为什么网格交易必须看索提诺（Sortino）？——给小白的波动率真相</span>
+            </div>
+            <div className="p-3.5 bg-purple-50/50 dark:bg-purple-950/20 rounded-xl border border-purple-100 dark:border-purple-900/40 text-xs space-y-2.5">
+              <div className="space-y-1">
+                <span className="font-bold text-purple-950 dark:text-purple-200">
+                  通俗比喻：只看挨打时的性价比，不惩罚赚钱时的狂飙
+                </span>
+                <p className="text-gray-600 dark:text-gray-300 leading-relaxed text-[11px]">
+                  传统<strong>夏普比率（Sharpe）</strong>把所有的价格波动都算作“风险”——哪怕某天标的脉冲暴涨让网格大笔高抛落袋，夏普也会将其视为“不稳定波动”而扣分；
+                  而<strong>索提诺比率（Sortino）</strong>仅统计负收益的下行半方差。
+                  <strong>它只考核策略在挨打下跌时承受了多少浮亏，而完全不惩罚暴涨冲高时的获利狂欢</strong>。
+                </p>
+              </div>
+
+              {/* 段位对照表 */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 font-mono text-center">
+                <div className="p-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <div className="text-[11px] font-bold text-gray-500">&lt; 0.8</div>
+                  <div className="text-[10px] text-gray-400 font-sans">偏弱防守</div>
+                </div>
+                <div className="p-2 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-900">
+                  <div className="text-[11px] font-bold text-blue-600">0.8 ~ 1.4</div>
+                  <div className="text-[10px] text-blue-500 font-sans">✓ 风险均衡</div>
+                </div>
+                <div className="p-2 bg-white dark:bg-gray-800 rounded-lg border border-emerald-200 dark:border-emerald-900">
+                  <div className="text-[11px] font-bold text-emerald-600">1.4 ~ 2.0</div>
+                  <div className="text-[10px] text-emerald-500 font-sans">🚀 优秀抗跌</div>
+                </div>
+                <div className="p-2 bg-white dark:bg-gray-800 rounded-lg border border-purple-200 dark:border-purple-900">
+                  <div className="text-[11px] font-bold text-purple-600">&gt; 2.0</div>
+                  <div className="text-[10px] text-purple-500 font-sans">⭐ 极佳造血</div>
+                </div>
               </div>
             </div>
           </div>

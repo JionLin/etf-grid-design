@@ -23,6 +23,8 @@ import {
   Coins,
   Scale,
   ShieldCheck,
+  HelpCircle,
+  X,
 } from "lucide-react";
 import CrisisReplayModal from "./CrisisReplayModal";
 import { isAbortError, runBacktest } from "@shared/services/api";
@@ -99,6 +101,7 @@ const BacktestCard = ({
   const [hoverIndex, setHoverIndex] = useState(null);
   const [selectedCrisis, setSelectedCrisis] = useState(null);
   const [isCrisisModalOpen, setIsCrisisModalOpen] = useState(false);
+  const [showSortinoPopover, setShowSortinoPopover] = useState(false);
 
   // 加载回测数据
   const fetchBacktest = async (days, forcedCustomPrice = null, signal) => {
@@ -622,59 +625,221 @@ const BacktestCard = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* 1. 索提诺比率 */}
-              <div
-                className="p-3 bg-white rounded-xl border border-gray-100 shadow-2xs"
-                title="Sortino Ratio: 仅以负超额收益计算下行半方差，不惩罚脉冲上涨波动。>1.5为优秀，>2.0为极佳"
-              >
-                <div className="text-[11px] text-gray-500 flex items-center justify-between">
-                  <span>索提诺比率 (Sortino)</span>
+              {/* 1. 索提诺比率 (Sortino) - 方案3：常驻4段色阶槽位 + 0延迟Hover/Click Popover */}
+              <div className="p-3.5 bg-white rounded-xl border border-gray-100 shadow-2xs space-y-2 relative">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-gray-700 text-[11px]">索提诺比率 (Sortino)</span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSortinoPopover((prev) => !prev)}
+                      onMouseEnter={() => setShowSortinoPopover(true)}
+                      onMouseLeave={() => setShowSortinoPopover(false)}
+                      className="text-gray-400 hover:text-indigo-600 transition-colors p-0.5 cursor-pointer"
+                      aria-label="索提诺比率解释"
+                    >
+                      <HelpCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                   <Scale className="w-3.5 h-3.5 text-indigo-500" />
                 </div>
-                <div className="text-xl font-black font-mono text-gray-900 mt-1">
-                  {summary.sortino_ratio != null ? summary.sortino_ratio : "— (无下行方差)"}
+
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xl font-black font-mono text-gray-900">
+                    {summary.sortino_ratio != null ? summary.sortino_ratio : "—"}
+                  </span>
+                  <span
+                    className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                      summary.sortino_ratio >= 2.0
+                        ? "bg-purple-50 text-purple-700 border border-purple-200"
+                        : summary.sortino_ratio >= 1.4
+                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                        : summary.sortino_ratio >= 0.8
+                        ? "bg-blue-50 text-blue-700 border border-blue-200"
+                        : "bg-gray-100 text-gray-600 border border-gray-200"
+                    }`}
+                  >
+                    {summary.sortino_ratio >= 2.0
+                      ? "⭐ 极佳造血"
+                      : summary.sortino_ratio >= 1.4
+                      ? "🚀 优秀抗跌"
+                      : summary.sortino_ratio >= 0.8
+                      ? "✓ 风险均衡"
+                      : "偏弱防守"}
+                  </span>
                 </div>
-                <div className="text-[10px] text-indigo-600 font-medium mt-0.5">
-                  {summary.sortino_ratio >= 2.0
-                    ? "⭐ 下行性价比极佳"
-                    : summary.sortino_ratio >= 1.0
-                    ? "✓ 风险收益均衡"
-                    : "稳健防守中"}
+
+                {/* 常驻 4 段微型色阶槽位 */}
+                <div
+                  className="grid grid-cols-4 gap-1 p-0.5 bg-gray-50 rounded-lg text-center font-mono text-[9px] cursor-pointer"
+                  onMouseEnter={() => setShowSortinoPopover(true)}
+                  onMouseLeave={() => setShowSortinoPopover(false)}
+                  onClick={() => setShowSortinoPopover((prev) => !prev)}
+                  title="点击或悬浮查看索提诺4档段位详解"
+                >
+                  <div
+                    className={`py-0.5 rounded transition-all ${
+                      summary.sortino_ratio < 0.8
+                        ? "bg-amber-100 text-amber-900 font-bold ring-1 ring-amber-400 shadow-2xs"
+                        : "text-gray-400 bg-gray-100/60"
+                    }`}
+                  >
+                    &lt;0.8 偏弱
+                  </div>
+                  <div
+                    className={`py-0.5 rounded transition-all ${
+                      summary.sortino_ratio >= 0.8 && summary.sortino_ratio < 1.4
+                        ? "bg-blue-100 text-blue-900 font-bold ring-1 ring-blue-400 shadow-2xs"
+                        : "text-gray-400 bg-gray-100/60"
+                    }`}
+                  >
+                    0.8-1.4 均衡
+                  </div>
+                  <div
+                    className={`py-0.5 rounded transition-all ${
+                      summary.sortino_ratio >= 1.4 && summary.sortino_ratio < 2.0
+                        ? "bg-emerald-100 text-emerald-900 font-bold ring-1 ring-emerald-400 shadow-2xs"
+                        : "text-gray-400 bg-gray-100/60"
+                    }`}
+                  >
+                    1.4-2.0 优秀
+                  </div>
+                  <div
+                    className={`py-0.5 rounded transition-all ${
+                      summary.sortino_ratio >= 2.0
+                        ? "bg-purple-100 text-purple-900 font-bold ring-1 ring-purple-400 shadow-2xs"
+                        : "text-gray-400 bg-gray-100/60"
+                    }`}
+                  >
+                    &gt;2.0 极佳
+                  </div>
                 </div>
+
+                <div className="text-[10px] text-indigo-600 font-sans leading-tight">
+                  💡 每承受 1 份暴跌风险，换回 {summary.sortino_ratio ?? "—"} 份超额做T收益
+                </div>
+
+                {/* 0 延迟即时 Hover / Click 浮动详解卡片 (Popover) */}
+                {showSortinoPopover && (
+                  <div
+                    className="absolute left-0 top-full mt-2 w-76 sm:w-80 bg-white dark:bg-gray-900 rounded-xl shadow-2xl border border-indigo-100 dark:border-gray-700 p-4 z-40 space-y-2.5 text-xs text-gray-700 dark:text-gray-200 animate-in fade-in duration-150"
+                    onMouseEnter={() => setShowSortinoPopover(true)}
+                    onMouseLeave={() => setShowSortinoPopover(false)}
+                  >
+                    <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2">
+                      <div className="font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">
+                        <Scale className="w-4 h-4 text-indigo-600" />
+                        <span>索提诺比率 (Sortino) 段位标尺</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowSortinoPopover(false)}
+                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                      <strong>💡 通俗比喻：</strong>只考核下跌挨打（下行半方差），不惩罚暴涨冲高。当前标的每承受 1 元下跌浮亏风险，网格逆势做 T 换回 <strong className="text-indigo-600 dark:text-indigo-400 font-mono">{summary.sortino_ratio ?? "—"}</strong> 元超额收益。
+                    </p>
+
+                    {/* 4 档段位细解 */}
+                    <div className="space-y-1 pt-1 font-sans">
+                      <div
+                        className={`p-2 rounded-lg border text-[11px] flex items-center justify-between ${
+                          summary.sortino_ratio >= 2.0
+                            ? "bg-purple-50 border-purple-300 text-purple-900 font-bold dark:bg-purple-950/40 dark:text-purple-200"
+                            : "border-gray-100 text-gray-500 dark:border-gray-800 dark:text-gray-400"
+                        }`}
+                      >
+                        <span>⭐ &gt; 2.0 · 极佳造血</span>
+                        <span className="text-[10px] font-normal">
+                          {summary.sortino_ratio >= 2.0 ? "← 当前所处段位" : "长线网格圣杯"}
+                        </span>
+                      </div>
+                      <div
+                        className={`p-2 rounded-lg border text-[11px] flex items-center justify-between ${
+                          summary.sortino_ratio >= 1.4 && summary.sortino_ratio < 2.0
+                            ? "bg-emerald-50 border-emerald-300 text-emerald-900 font-bold dark:bg-emerald-950/40 dark:text-emerald-200"
+                            : "border-gray-100 text-gray-500 dark:border-gray-800 dark:text-gray-400"
+                        }`}
+                      >
+                        <span>🚀 1.4 ~ 2.0 · 优秀抗跌</span>
+                        <span className="text-[10px] font-normal">
+                          {summary.sortino_ratio >= 1.4 && summary.sortino_ratio < 2.0 ? "← 当前所处段位" : "对冲效率高，修复迅速"}
+                        </span>
+                      </div>
+                      <div
+                        className={`p-2 rounded-lg border text-[11px] flex items-center justify-between ${
+                          summary.sortino_ratio >= 0.8 && summary.sortino_ratio < 1.4
+                            ? "bg-blue-50 border-blue-300 text-blue-900 font-bold dark:bg-blue-950/40 dark:text-blue-200"
+                            : "border-gray-100 text-gray-500 dark:border-gray-800 dark:text-gray-400"
+                        }`}
+                      >
+                        <span>✓ 0.8 ~ 1.4 · 风险均衡</span>
+                        <span className="text-[10px] font-normal">
+                          {summary.sortino_ratio >= 0.8 && summary.sortino_ratio < 1.4 ? "← 当前所处段位" : "合格网格，抵消大部分下跌"}
+                        </span>
+                      </div>
+                      <div
+                        className={`p-2 rounded-lg border text-[11px] flex items-center justify-between ${
+                          summary.sortino_ratio < 0.8
+                            ? "bg-amber-50 border-amber-300 text-amber-900 font-bold dark:bg-amber-950/40 dark:text-amber-200"
+                            : "border-gray-100 text-gray-500 dark:border-gray-800 dark:text-gray-400"
+                        }`}
+                      >
+                        <span>⚠️ &lt; 0.8 · 偏弱防守</span>
+                        <span className="text-[10px] font-normal">
+                          {summary.sortino_ratio < 0.8 ? "← 当前所处段位" : "挨打跌幅大，做T收益没跟上"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* 2. 最长水下解套周期 */}
+              {/* 2. 回撤修复与解套韧性 (双维度拆解：最深暴跌自愈 vs 漫长水下横盘) */}
               <div
-                className="p-3 bg-white rounded-xl border border-gray-100 shadow-2xs"
-                title="历史最大水下周期：从见顶跌破高点到通过震荡做T彻底填平出水经历的日历天数"
+                className="p-3.5 bg-white rounded-xl border border-gray-100 shadow-2xs space-y-1.5"
+                title="最深回撤修复天数：最大浮亏谷底到爬坑解套；最长水下磨底天数：未破历史新高的最长横盘滞留"
               >
                 <div className="text-[11px] text-gray-500 flex items-center justify-between">
-                  <span>最长解套周期 (水下)</span>
+                  <span className="font-semibold text-gray-700">回撤修复与解套韧性</span>
                   <Clock className="w-3.5 h-3.5 text-rose-500" />
                 </div>
-                <div className="text-xl font-black font-mono text-rose-600 mt-1">
-                  {summary.longest_underwater_days != null
-                    ? `${summary.longest_underwater_days} 天`
-                    : "—"}
+                <div className="flex items-baseline justify-between font-mono">
+                  <div className="space-y-0.5">
+                    <span className="text-[10px] text-gray-400 block font-sans">最深回撤修复</span>
+                    <span className="text-lg font-black text-rose-600">
+                      {summary.max_dd_recovery_days != null ? `${summary.max_dd_recovery_days} 天` : "—"}
+                    </span>
+                  </div>
+                  <div className="text-right space-y-0.5">
+                    <span className="text-[10px] text-gray-400 block font-sans">最长水下磨底</span>
+                    <span className="text-lg font-black text-amber-600">
+                      {summary.longest_underwater_days != null ? `${summary.longest_underwater_days} 天` : "—"}
+                    </span>
+                  </div>
                 </div>
-                <div className="text-[10px] text-gray-500 mt-0.5">
-                  最大回撤 {summary.max_drawdown}% 时的历史爬坑修复期
+                <div className="text-[10px] text-gray-500 font-sans leading-relaxed truncate">
+                  最深危机回撤 {summary.max_drawdown}% · 磨底为横盘不创新高期
                 </div>
               </div>
 
               {/* 3. 平均资金占用与防爆仓垫 */}
               <div
-                className="p-3 bg-white rounded-xl border border-gray-100 shadow-2xs"
+                className="p-3.5 bg-white rounded-xl border border-gray-100 shadow-2xs space-y-1.5"
                 title="资金暴露度：持仓常规市值与免费股现值占总资产比例。余量为防暴跌深水补仓流动性底垫"
               >
                 <div className="text-[11px] text-gray-500 flex items-center justify-between">
-                  <span>资金利用率与安全垫</span>
+                  <span className="font-semibold text-gray-700">资金利用率与安全垫</span>
                   <Coins className="w-3.5 h-3.5 text-emerald-500" />
                 </div>
-                <div className="text-xl font-black font-mono text-gray-900 mt-1">
+                <div className="text-xl font-black font-mono text-gray-900">
                   均仓 {summary.avg_exposure ?? 50.0}%
                 </div>
-                <div className="text-[10px] text-emerald-700 mt-0.5">
+                <div className="text-[10px] text-emerald-700 font-sans truncate">
                   峰值吃刀 {summary.max_exposure ?? 50.0}% (余 {(100 - (summary.max_exposure ?? 50.0)).toFixed(1)}% 防爆仓现金垫)
                 </div>
               </div>
@@ -1128,23 +1293,32 @@ const BacktestCard = ({
                       <ShieldAlert className="w-3.5 h-3.5 text-rose-500" />
                       <span>重大危机复盘诊断:</span>
                     </span>
-                    {summary.top_drawdown_spells.map((spell, sIdx) => (
-                      <button
-                        key={sIdx}
-                        type="button"
-                        onClick={() => {
-                          setSelectedCrisis(spell);
-                          setIsCrisisModalOpen(true);
-                        }}
-                        className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-xs font-mono font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                        title="点击展开该次危机中网格倒金字塔加码低吸与做T差价现金流复盘"
-                      >
-                        <span>
-                          #{spell.rank} 回撤 -{Math.abs(spell.max_dd_pct)}% ({spell.peak_date} ~ {spell.recovered_date || "至今"})
-                        </span>
-                        <span className="text-[10px] text-rose-600 underline font-sans">复盘 ➔</span>
-                      </button>
-                    ))}
+                    {summary.top_drawdown_spells.map((spell, sIdx) => {
+                      const isGrind = spell.spell_type === "longest_grind";
+                      return (
+                        <button
+                          key={sIdx}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCrisis(spell);
+                            setIsCrisisModalOpen(true);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                            isGrind
+                              ? "bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-800"
+                              : "bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700"
+                          }`}
+                          title="点击展开该次危机中网格倒金字塔加码低吸与做T差价现金流复盘"
+                        >
+                          <span>
+                            {spell.tag_label || `#${spell.rank}`} 回撤 -{Math.abs(spell.max_dd_pct)}% ({spell.peak_date} ~ {spell.recovered_date || "至今"} 历时{spell.underwater_days}天)
+                          </span>
+                          <span className={`text-[10px] underline font-sans ${isGrind ? "text-amber-700" : "text-rose-600"}`}>
+                            复盘 ➔
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>

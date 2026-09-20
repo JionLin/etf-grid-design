@@ -118,11 +118,37 @@ def extract_drawdown_spells(
 
     longest_underwater_days = max([s["underwater_days"] for s in spells]) if spells else 0
 
-    # 按回撤深度降序排列，取 Top 3 危机切片
-    sorted_spells = sorted(spells, key=lambda x: x["max_dd"], reverse=True)[:3]
+    # 按回撤深度降序排列，提取最大回撤本身的修复天数
+    depth_sorted_spells = sorted(spells, key=lambda x: x["max_dd"], reverse=True)
+    max_dd_recovery_days = depth_sorted_spells[0]["underwater_days"] if depth_sorted_spells else 0
+
+    # 深度前 3 大危机切片
+    depth_top3 = depth_sorted_spells[:3]
+
+    # 全局水下横盘磨底时间最长的切片
+    longest_duration_spell = max(spells, key=lambda x: x["underwater_days"]) if spells else None
+
+    selected_spells = []
+    for idx, sp in enumerate(depth_top3):
+        selected_spells.append({
+            "spell": sp,
+            "rank": idx + 1,
+            "spell_type": "deepest_crisis",
+            "tag_label": f"🚨 最深危机 #{idx + 1}" if idx == 0 else f"🚨 深度回撤 #{idx + 1}",
+        })
+
+    # 如果最长磨底切片不在前3深危机中，作为专属切片追加纳入诊断
+    if longest_duration_spell is not None and longest_duration_spell not in depth_top3:
+        selected_spells.append({
+            "spell": longest_duration_spell,
+            "rank": len(selected_spells) + 1,
+            "spell_type": "longest_grind",
+            "tag_label": "⏳ 最长磨底",
+        })
 
     top_drawdown_spells = []
-    for idx, sp in enumerate(sorted_spells):
+    for item in selected_spells:
+        sp = item["spell"]
         s_date_str = sp["start_date"]
         e_date_str = sp["recovered_date"] if sp["recovered_date"] else dates[-1].strftime("%Y-%m-%d")
 
@@ -135,7 +161,9 @@ def extract_drawdown_spells(
         t_profit = sum(float(t.get("profit", 0.0)) for t in sell_trades)
 
         top_drawdown_spells.append({
-            "rank": idx + 1,
+            "rank": item["rank"],
+            "spell_type": item["spell_type"],
+            "tag_label": item["tag_label"],
             "max_dd_pct": round(float(sp["max_dd"]) * 100, 2),
             "peak_date": sp["peak_date"],
             "start_date": sp["start_date"],
@@ -151,6 +179,7 @@ def extract_drawdown_spells(
         })
 
     return {
+        "max_dd_recovery_days": max_dd_recovery_days,
         "longest_underwater_days": longest_underwater_days,
         "top_drawdown_spells": top_drawdown_spells,
     }
@@ -640,6 +669,7 @@ class GridBacktestEngine:
                 "alpha": alpha,
                 "max_drawdown": round(max_drawdown * 100, 2),
                 "sortino_ratio": sortino,
+                "max_dd_recovery_days": spell_stats["max_dd_recovery_days"],
                 "longest_underwater_days": spell_stats["longest_underwater_days"],
                 "avg_exposure": exposure_stats["avg_exposure"],
                 "max_exposure": exposure_stats["max_exposure"],

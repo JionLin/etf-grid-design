@@ -33,6 +33,8 @@ export default function CrisisReplayModal({ isOpen, onClose, crisisData, etfCode
 
   const {
     rank = 1,
+    spell_type = "deepest_crisis",
+    tag_label = null,
     max_dd_pct = 0,
     peak_date = "",
     start_date = "",
@@ -46,6 +48,8 @@ export default function CrisisReplayModal({ isOpen, onClose, crisisData, etfCode
     buy_amount = 0,
     t_profit = 0,
   } = crisisData;
+
+  const isGrind = spell_type === "longest_grind";
 
   return (
     <div
@@ -67,18 +71,30 @@ export default function CrisisReplayModal({ isOpen, onClose, crisisData, etfCode
 
         {/* 头部 */}
         <div className="flex items-center gap-3 border-b border-gray-100 dark:border-gray-800 pb-4">
-          <div className="p-3 bg-rose-100 dark:bg-rose-950/60 rounded-xl text-rose-600 dark:text-rose-400">
+          <div
+            className={`p-3 rounded-xl ${
+              isGrind
+                ? "bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400"
+                : "bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400"
+            }`}
+          >
             <ShieldAlert className="w-6 h-6" />
           </div>
           <div>
             <h3 className="text-lg font-bold flex items-center gap-2">
-              <span>历史重大回撤危机复盘诊断</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900">
-                严重程度 TOP {rank}
+              <span>{isGrind ? "历史最长水下横盘磨底复盘诊断" : "历史重大回撤危机复盘诊断"}</span>
+              <span
+                className={`text-xs px-2 py-0.5 rounded-full border ${
+                  isGrind
+                    ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-800"
+                    : "bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950/50 dark:text-rose-400 dark:border-rose-900"
+                }`}
+              >
+                {tag_label || (isGrind ? "⏳ 最长磨底" : `严重程度 TOP ${rank}`)}
               </span>
             </h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              标的：{etfCode} {etfName} · 穿透量化网格在极端逆境中的自愈对冲全过程
+              标的：{etfCode} {etfName} · {isGrind ? "钝刀子割肉与横盘不创新高阶段的网格做T耐磨性" : "穿透量化网格在极端暴跌逆境中的自愈对冲全过程"}
             </p>
           </div>
         </div>
